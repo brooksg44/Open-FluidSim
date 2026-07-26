@@ -404,29 +404,38 @@ cylinders and a single HUD figure could not say which one it meant."
 
 Starts on the relay demo unless a circuit is supplied: switch to RUN and click
 the pushbutton to drive the valve and extend the cylinder."
-  (let* ((circuit (or circuit (ofs:make-relay-demo-circuit)))
-         (editor (make-editor :circuit circuit))
+  (let* ((editor (make-editor :circuit (or circuit (ofs:make-relay-demo-circuit))))
          (camera (rl:make-camera2d :offset (v:vec2 0.0 0.0)
                                    :target (v:vec2 0.0 0.0)
                                    :rotation 0.0
-                                   :zoom 3.0)))
+                                   :zoom 3.0))
+         ;; The circuit the view was last fitted to. A load swaps the editor's
+         ;; circuit for a different object, and this is how the loop notices.
+         (fitted nil))
     ;; Must precede window creation -- these flags are read by InitWindow.
     (rl:set-config-flags '(:flag-window-resizable))
     (rl:with-window (width height "Open FluidSim")
       (rl:set-window-min-size 640 400)
       (rl:set-target-fps 60)
       (sync-camera-to-window camera)
-      (fit-view camera circuit)
       (loop until (rl:window-should-close)
             do (sync-camera-to-window camera)
-               (when (rl:is-window-resized) (fit-view camera circuit))
                (handle-pan-and-zoom camera)
                (handle-mouse editor camera)
                (handle-keys editor camera)
-               (if (eq (editor-mode editor) :run)
-                   (ofs:step-simulation circuit :dt (rl:get-frame-time))
-                   ;; Editing: settle everything to zero so nothing reads live.
-                   (ofs:propagate circuit :supply 0.0))
+               ;; Read the circuit back *after* the input handlers, never once
+               ;; before the loop: a load replaces it wholesale, and a captured
+               ;; reference would leave the simulation running the old circuit
+               ;; while the canvas drew the new one -- pressing a button in the
+               ;; loaded drawing would then do nothing at all.
+               (let ((circuit (editor-circuit editor)))
+                 (when (or (not (eq circuit fitted)) (rl:is-window-resized))
+                   (fit-view camera circuit)
+                   (setf fitted circuit))
+                 (if (eq (editor-mode editor) :run)
+                     (ofs:step-simulation circuit :dt (rl:get-frame-time))
+                     ;; Editing: settle everything to zero so nothing reads live.
+                     (ofs:propagate circuit :supply 0.0)))
                (rl:with-drawing
                  (rl:clear-background :raywhite)
                  (rl:with-mode-2d (camera)
