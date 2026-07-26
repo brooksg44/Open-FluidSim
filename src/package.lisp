@@ -30,7 +30,7 @@
    #:circuit #:make-circuit #:circuit-components #:circuit-wires #:circuit-sources
    #:add-component #:connect #:add-source
    ;; engine
-   #:update-actuators #:update-cylinders #:propagate #:step-simulation
+   #:update-cylinders #:propagate #:step-simulation
    #:pressurised-p #:energise #:de-energise #:source-connectors
    #:return-connectors #:grounded-connectors #:flood #:update-valves
    #:update-electric

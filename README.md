@@ -11,9 +11,11 @@ wired together — so every layer is exercised: component model, valve position
 logic, pressure propagation, cylinder motion, composable symbol geometry, and
 rendering.
 
-Hold `1` and the cylinder extends; **release it and the cylinder keeps going**,
-because the detent holds the valve where it was put. That is the behaviour the
-whole component exists for, and it is what a spring-return valve would not do.
+Press `space` to run, then click the `S1` pushbutton and the cylinder extends.
+A tap is enough: **release the button and the cylinder keeps going**, because
+the detent holds the valve where it was put. That is the behaviour the whole
+component exists for, and it is what a spring-return valve would not do. `S2`
+sends it back.
 
 Live pressure is drawn in red: pressurised wires and filled connection points,
 against grey and hollow rings for the rest.
@@ -133,6 +135,10 @@ captions — in a y-up coordinate system. `ui/render.lisp` is the only file that
 knows raylib exists, so an SVG or PDF exporter is a second renderer rather than
 a change to the symbol definitions.
 
+See [MAINTAINING.md](MAINTAINING.md) for a file-by-file tour, the per-frame
+data flow, and the Common Lisp you need to read the code — written for someone
+who can program but is new to the language.
+
 ### Symbols are code, not sprites
 
 In the Unity original every combination of actuators needed its own
@@ -157,10 +163,10 @@ visited set, and the result does not depend on traversal order.
 ### The detent
 
 A detented valve holds its last commanded position when both coils are off —
-and when both are on. In `update-actuators` that behaviour is the *absence* of
-an else branch: nothing resets the state, so it persists. Four tests pin this
-down, since it is the property that distinguishes the component from a
-spring-return valve.
+and when both are on. In `update-valves` that behaviour is the *absence* of an
+else branch: nothing resets the state, so it persists. Tests pin this down,
+since it is the property that distinguishes the component from a spring-return
+valve.
 
 ## Running
 
@@ -171,20 +177,28 @@ Requires SBCL, Quicklisp, and raylib (`brew install raylib` on macOS).
 ./run.sh --test   # run the test suite
 ```
 
-Hold `1` to extend the cylinder, `2` to retract, drag to pan, wheel to zoom,
-`F` to fit the circuit to the window. Release both keys and the spool stays
-where you put it — that is the detent.
+`space` toggles between EDIT and RUN. In RUN, click the `S1` pushbutton to
+extend the cylinder and `S2` to retract it; right-drag pans, the wheel zooms,
+and `F` fits the circuit to the window. Tap a button rather than holding it and
+the spool stays where you put it — that is the detent.
 
 The window is resizable, and refits the view on resize so shrinking it never
 hides the drawing.
 
 ### Adding a component
 
-A component kind needs two clauses, both in `src/library.lisp`: one in
-`component-ports` giving the positions wires attach to, and one in
-`component-geometry` returning its drawing operations. A test walks every
-component in the demo circuit and fails if either is missing, so a half-added
-kind is caught by the suite rather than at draw time.
+A component kind is one `register-kind` call, in whichever `src/` file it
+belongs to: how to build one, where its wires attach, and how to draw it.
+Dispatch is a hash lookup rather than a central `case`, so there is no list to
+keep in step. A valve is less than that again — a `valve-spec`, since one
+geometry function draws them all.
+
+A test walks every registered kind and fails if it cannot be built, positioned
+or drawn, so a half-added kind is caught by the suite rather than at click
+time.
+
+[MAINTAINING.md](MAINTAINING.md) has the worked recipe, and the same for
+valves, symbols, key bindings and the save format.
 
 From a REPL instead:
 
