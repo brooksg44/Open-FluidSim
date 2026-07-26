@@ -310,6 +310,142 @@
     (is (eq :open (ofs:component-state contact))
         "an NC contact sharing the coil's label should open")))
 
+;;; Proximity switches: a contact actuated by a piston rather than by a coil.
+
+(defun make-sensor-rung (&key (kind :sensor-no) (tag "A1"))
+  "+24V -> prox switch -> K1 -> 0V, beside an unpressurised cylinder A1.
+
+Nothing feeds the cylinder, so UPDATE-CYLINDERS holds whatever travel the test
+sets. Returns (values circuit sensor cylinder coil)."
+  (let* ((circuit (ofs:make-circuit))
+         (cylinder (ofs:add-component circuit
+                                      (ofs:make-component-of-kind :cylinder-double)))
+         (power (ofs:add-component circuit (ofs:make-component-of-kind :power-24v)))
+         (sensor (ofs:add-component circuit (ofs:make-component-of-kind kind)))
+         (coil (ofs:add-component circuit (ofs:make-component-of-kind :coil)))
+         (ground (ofs:add-component circuit (ofs:make-component-of-kind :common-0v))))
+    (ofs:rename-component sensor tag)
+    (ofs:connect circuit (ofs:component-connector power 0)
+                 (ofs:component-connector sensor 0))
+    (ofs:connect circuit (ofs:component-connector sensor 1)
+                 (ofs:component-connector coil 0))
+    (ofs:connect circuit (ofs:component-connector coil 1)
+                 (ofs:component-connector ground 0))
+    (values circuit sensor cylinder coil)))
+
+(test a-cylinder-carries-a-tag
+  ;; Without one there is no way to say which cylinder a switch is mounted on.
+  (let ((cylinder (ofs:make-component-of-kind :cylinder-double)))
+    (is (string= "A1" (ofs:component-label cylinder))))
+  ;; And a file saved before cylinders had tags must come back with one, or a
+  ;; switch placed on a reloaded circuit would silently never trip.
+  (let* ((form '(:open-fluidsim 1
+                 :components ((:kind :cylinder-double :origin (0.0 0.0)
+                               :label "" :name "Cylinder" :state :fixed :travel 0.0)
+                              (:kind :cylinder-double :origin (100.0 0.0)
+                               :label "" :name "Cylinder" :state :fixed :travel 0.0))
+                 :wires ()))
+         (circuit (ofs:circuit-from-form form))
+         (tags (mapcar #'ofs:component-label
+                       (reverse (ofs:circuit-components circuit)))))
+    (is (equal '("A1" "A2") tags) "untagged cylinders should be numbered on load")))
+
+(test a-switch-tag-carries-its-mounting-point
+  (flet ((target (tag)
+           (let ((sensor (ofs:make-component-of-kind :sensor-no)))
+             (ofs:rename-component sensor tag)
+             (multiple-value-list (ofs:sensor-target sensor)))))
+    (is (equal '("A1" 1.0) (target "A1")) "a bare tag is the extended end")
+    (is (equal '("A1" 0.0) (target "A1@0")))
+    (is (equal '("A2" 0.5) (target "A2@50")))
+    (is (equal '("A1" 1.0) (target "A1@100")))
+    ;; Nonsense in the tag must fall back rather than break the step loop,
+    ;; since the tag is free text the user types.
+    (is (equal '("A1" 1.0) (target "A1@999")))
+    (is (equal '("A1" 0.0) (target "A1@-20")))
+    (is (equal '("A1" 1.0) (target "A1@")))
+    (is (equal '("A1" 1.0) (target "A1@abc")))))
+
+(test a-prox-switch-closes-when-the-piston-reaches-it
+  (multiple-value-bind (circuit sensor cylinder coil) (make-sensor-rung)
+    (setf (ofs:component-travel cylinder) 0.0)
+    (settle circuit :steps 5)
+    (is (eq :open (ofs:component-state sensor)) "retracted: nothing at the switch")
+    (is (not (ofs:component-energised coil)))
+    (setf (ofs:component-travel cylinder) 1.0)
+    (settle circuit :steps 5)
+    (is (eq :closed (ofs:component-state sensor)) "the piston has reached it")
+    (is (ofs:component-energised coil) "and it should carry current")))
+
+(test a-prox-switch-can-be-mounted-part-way-along-the-stroke
+  (multiple-value-bind (circuit sensor cylinder) (make-sensor-rung :tag "A1@50")
+    (setf (ofs:component-travel cylinder) 1.0)
+    (settle circuit :steps 5)
+    (is (eq :open (ofs:component-state sensor))
+        "fully extended is past a mid-stroke switch, not at it")
+    (setf (ofs:component-travel cylinder) 0.5)
+    (settle circuit :steps 5)
+    (is (eq :closed (ofs:component-state sensor)))))
+
+(test a-normally-closed-prox-switch-opens-at-the-piston
+  (multiple-value-bind (circuit sensor cylinder) (make-sensor-rung :kind :sensor-nc)
+    (setf (ofs:component-travel cylinder) 0.0)
+    (settle circuit :steps 5)
+    (is (eq :closed (ofs:component-state sensor)))
+    (setf (ofs:component-travel cylinder) 1.0)
+    (settle circuit :steps 5)
+    (is (eq :open (ofs:component-state sensor)))))
+
+(test a-prox-switch-naming-no-cylinder-never-closes
+  (multiple-value-bind (circuit sensor cylinder) (make-sensor-rung :tag "A9")
+    (setf (ofs:component-travel cylinder) 1.0)
+    (settle circuit :steps 5)
+    (is (eq :open (ofs:component-state sensor))
+        "a switch mounted on a cylinder that is not there must stay open")))
+
+(test a-prox-switch-sends-the-cylinder-back-at-the-end-of-its-stroke
+  ;; The classic use, and the whole reason for the component: tap S1 to send
+  ;; the rod out, and the switch at the extended end brings it home with no
+  ;; second press. Before this the only way to reverse was another button.
+  (multiple-value-bind (circuit valve cylinder) (ofs:make-demo-circuit)
+    (destructuring-bind (coil-a coil-b) (ofs:component-solenoids valve)
+      (flet ((add (kind) (ofs:add-component circuit (ofs:make-component-of-kind kind))))
+        (let ((power (add :power-24v))   (start (add :push-button))
+              (y1a (add :solenoid-out))  (gnd (add :common-0v))
+              (power-2 (add :power-24v)) (prox (add :sensor-no))
+              (y1b (add :solenoid-out))  (gnd-2 (add :common-0v)))
+          (ofs:rename-component y1a (ofs:solenoid-name coil-a))
+          (ofs:rename-component y1b (ofs:solenoid-name coil-b))
+          (ofs:rename-component prox (ofs:component-label cylinder))
+          ;; Rung 1: S1 extends.
+          (ofs:connect circuit (ofs:component-connector power 0)
+                       (ofs:component-connector start 0))
+          (ofs:connect circuit (ofs:component-connector start 1)
+                       (ofs:component-connector y1a 0))
+          (ofs:connect circuit (ofs:component-connector y1a 1)
+                       (ofs:component-connector gnd 0))
+          ;; Rung 2: the switch at the extended end retracts.
+          (ofs:connect circuit (ofs:component-connector power-2 0)
+                       (ofs:component-connector prox 0))
+          (ofs:connect circuit (ofs:component-connector prox 1)
+                       (ofs:component-connector y1b 0))
+          (ofs:connect circuit (ofs:component-connector y1b 1)
+                       (ofs:component-connector gnd-2 0))
+          (settle circuit :steps 5)
+          (is (= 0.0 (ofs:component-travel cylinder)) "starts retracted")
+          (is (eq :open (ofs:component-state prox)))
+          ;; A momentary tap, then hands off.
+          (setf (ofs:component-pressed start) t)
+          (settle circuit :steps 5)
+          (setf (ofs:component-pressed start) nil)
+          (is (eq :left (ofs:component-state valve)) "the tap sends it out")
+          (settle circuit :steps 240)
+          (is (= 0.0 (ofs:component-travel cylinder))
+              "the switch should have sent it home with no second press")
+          (is (eq :right (ofs:component-state valve)))
+          (is (eq :open (ofs:component-state prox))
+              "and dropped out again once the piston left it"))))))
+
 ;;; Saving and loading.
 
 (defun temp-circuit-path (name)

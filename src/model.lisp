@@ -40,6 +40,11 @@
   (travel 0.0 :type real)
   (travel-rate 1.2 :type real))
 
+(defparameter *cylinder-kinds*
+  '(:cylinder-double :cylinder-single :cylinder-double-hyd :cylinder-single-hyd)
+  "Kinds that have a piston: what UPDATE-CYLINDERS drives, what the canvas
+prints a travel readout for, and what a proximity switch can be mounted on.")
+
 (defun fixed-table (n)
   "A port table for a component with no internal connections."
   (list (cons :fixed (make-array n :initial-element -1))))

@@ -23,6 +23,7 @@
    #:component-connector #:component-shift #:component-travel #:component-travel-rate
    #:component-domain #:component-hold #:component-rest-state #:component-label
    #:component-energised #:component-pressed #:component-table #:fixed-table
+   #:*cylinder-kinds*
    ;; registry
    #:register-kind #:kind-info #:kind-label #:kind-domain #:all-kinds
    #:kinds-in-domain #:domains #:palette-for-domain
@@ -33,7 +34,8 @@
    #:update-cylinders #:propagate #:step-simulation
    #:pressurised-p #:energise #:de-energise #:source-connectors
    #:return-connectors #:grounded-connectors #:flood #:update-valves
-   #:update-electric
+   #:update-electric #:sensor-target #:sensor-tripped-p
+   #:*sensor-band* #:*switch-kinds*
    ;; editing
    #:make-component-of-kind #:component-bounds #:point-in-component-p
    #:component-at #:connector-at #:move-component #:wire-between #:toggle-wire

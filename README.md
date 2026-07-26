@@ -20,19 +20,24 @@ sends it back.
 Live pressure is drawn in red: pressurised wires and filled connection points,
 against grey and hollow rings for the rest.
 
+Proximity switches close the loop back the other way: mount one on a cylinder
+and the rod reaching the end of its stroke drives the next step of the
+sequence, so a circuit can cycle itself instead of needing a press per move.
+
 What does not exist yet: undo, orthogonal wire routing (wires are drawn
-straight between ports), and sensors.
+straight between ports), timers and counters.
 
 ## Components
 
-26 kinds across three domains, each on its own palette tab.
+30 kinds across three domains, each on its own palette tab. The list scrolls
+with the wheel when it runs past the bottom of the window.
 
 **Pneumatic / Hydraulic** — 2/2, 3/2, 5/2, 5/2 double-solenoid, 5/2 detented
 and 5/3 closed-centre valves; double- and single-acting cylinders; supply and
 exhaust (pneumatic); pump and reservoir (hydraulic).
 
 **Electric** — +24V and 0V rails, NO/NC contacts, NO/NC pushbuttons, relay
-coil, solenoid.
+coil, solenoid, NO/NC proximity switches.
 
 Valves are **data, not code**. They are all the same drawing — N position
 boxes, flow arrows inside, actuators on the ends, fixed ports the body slides
@@ -59,6 +64,30 @@ labelled `K1`, and a solenoid labelled `Sol 1` drives the valve coil of that
 name. `make-relay-demo-circuit` wires up the full chain — button → K1 coil →
 K1 contact → Sol 1 → valve → cylinder.
 
+### Proximity switches
+
+A proximity switch is a contact actuated by a piston instead of a coil, and it
+is what closes the loop from the pneumatic side back to the electrical one: the
+rod reaching the end of its stroke can now start the next thing to happen,
+rather than every move needing a button press.
+
+It follows the same rule as everything else — its tag names the cylinder it is
+mounted on, which is why cylinders are tagged `A1`, `A2`... The mounting point
+rides in the tag after an `@`, as a percentage of stroke:
+
+| tag | closes when |
+|---|---|
+| `A1` | cylinder `A1` is fully extended |
+| `A1@0` | `A1` is fully retracted |
+| `A1@50` | `A1`'s piston passes the middle of its stroke |
+
+Like a real reed switch it senses a *window* rather than a point (`*sensor-band*`,
+5% of stroke either side), so a fast piston cannot step clean over it between
+one frame and the next.
+
+Wire one to the retract solenoid of a detented valve and a momentary tap on the
+extend button gives a complete out-and-back cycle with no second press.
+
 ## The editor
 
 Two modes, toggled with `space`:
@@ -79,14 +108,16 @@ Two modes, toggled with `space`:
 | `Del` / `Backspace` | remove the selected component and its wires |
 | `Esc` | cancel a placement or a half-finished wire |
 | right-drag / wheel / `F` | pan, zoom, fit to window |
+| wheel over the palette | scroll the component list |
 | click a pushbutton (RUN only) | press it while the mouse is held |
 
 Valves are shifted **only** by wiring a solenoid symbol to their coil tag and
 energising it — there is no keyboard override, which would silently fight the
 electrical simulation.
 
-Cylinders print their extension as a percentage beside them, on the canvas
-rather than in the HUD, since a circuit can hold more than one.
+Cylinders print their extension as a percentage beside them, and their tag
+below them — on the canvas rather than in the HUD, since a circuit can hold
+more than one and a single HUD figure could not say which it meant.
 
 ## Saving
 

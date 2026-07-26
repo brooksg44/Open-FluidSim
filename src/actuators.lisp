@@ -21,7 +21,10 @@
                       (- +cylinder-length+ 34.0) (* -0.8 h)))
      (glyph-port-stub (pt 10.0 (- h)) :up nil)
      (unless single
-       (glyph-port-stub (pt 70.0 (- h)) :up nil)))))
+       (glyph-port-stub (pt 70.0 (- h)) :up nil))
+     ;; The tag, below the barrel and clear of the port stubs. Worth the ink
+     ;; because it is what a proximity switch names to find this cylinder.
+     (list (caption (pt 0.0 (- (+ h 8.0))) (component-label component) :size 6)))))
 
 (defun cylinder-ports (component)
   (if (= 1 (length (component-connectors component)))
@@ -33,6 +36,10 @@
   (register-kind
    kind
    :label label :domain domain
+   ;; Cylinders are auto-numbered A1, A2... so a proximity switch has something
+   ;; to name. Before this they carried no tag at all and there was no way to
+   ;; say which cylinder a switch was mounted on.
+   :label-prefix "A"
    :make (lambda ()
            (let ((component (make-component :name label :kind kind :domain domain
                                             :state :fixed

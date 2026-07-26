@@ -112,9 +112,7 @@ With nothing pressurised a double-acting piston holds position rather than
 drifting, so a detented valve parked between commands leaves it where it was.
 A single-acting cylinder is spring-returned and falls back instead."
   (dolist (component (circuit-components circuit))
-    (when (member (component-kind component)
-                  '(:cylinder-double :cylinder-single
-                    :cylinder-double-hyd :cylinder-single-hyd))
+    (when (member (component-kind component) *cylinder-kinds*)
       (let* ((connectors (component-connectors component))
              (single (= 1 (length connectors)))
              (cap (component-connector component 0))

@@ -8,7 +8,7 @@ is. This file explains *how the code is laid out*, *which Common Lisp you need
 to read it*, and *what to do when you want to change something*. Read the
 README first; it is short.
 
-The whole thing is about 2,600 lines across 20 files. That is small enough to
+The whole thing is about 2,900 lines across 20 files. That is small enough to
 read in an afternoon, and this guide is arranged so you can.
 
 ---
@@ -25,7 +25,7 @@ raylib` on macOS). The test suite needs neither raylib nor a display — the
 core has no renderer in it, which is deliberate and is the single most useful
 fact about the architecture.
 
-At the time of writing the suite is 32 tests / 226 checks, all passing. If you
+At the time of writing the suite is 39 tests / 259 checks, all passing. If you
 break something, `./run.sh --test` will usually tell you exactly what.
 
 ### The way you actually want to work
@@ -254,9 +254,12 @@ walk drawing operations this way.
 
 - `defvar` — set only if currently unbound. Reloading the file does *not*
   reset it. Used for registries (`*kinds*`, `*valve-specs*`,
-  `*palette-previews*`), which must survive a reload.
+  `*palette-previews*`), which must survive a reload, and for live UI state
+  like `*palette-scroll*`, which should not jump back to the top when you
+  recompile the file.
 - `defparameter` — always reset on reload. Used for tunables you want to
-  change and re-evaluate: `*port-radius*`, `*palette-width*`, `*lead*`.
+  change and re-evaluate: `*port-radius*`, `*palette-width*`, `*lead*`,
+  `*sensor-band*`.
 - `defconstant` — `+box-w+`, `+cylinder-length+`, `+save-format-version+`.
   The `+plus+` naming is convention only.
 
@@ -299,19 +302,19 @@ nothing below. That order is in `open-fluidsim.asd` and is worth respecting.
 
 | File | Lines | What it is |
 |---|---|---|
-| `src/package.lisp` | 50 | The package and its export list. Edit when you add a public name. |
+| `src/package.lisp` | 52 | The package and its export list. Edit when you add a public name. |
 | `src/geometry.lisp` | 71 | `pt`, the five drawing operations, `translate-ops`, `ops-bounds`. |
 | `src/glyphs.lisp` | 99 | Reusable ISO 1219 pieces: solenoid, spring, detent, arrow, blocked port, port stub. |
-| `src/model.lisp` | 79 | The `component`, `connector`, `solenoid` and `circuit` structs. **Read this one twice.** |
-| `src/engine.lisp` | 144 | Flood fill, valve actuation, cylinder motion, `step-simulation`. |
+| `src/model.lisp` | 84 | The `component`, `connector`, `solenoid` and `circuit` structs. **Read this one twice.** |
+| `src/engine.lisp` | 142 | Flood fill, valve actuation, cylinder motion, `step-simulation`. |
 | `src/registry.lisp` | 86 | `register-kind` and the kind table; how a kind maps to make/ports/geometry. |
 | `src/valves.lisp` | 266 | `valve-spec`, the one geometry function that draws every valve, and the twelve valve registrations. |
-| `src/actuators.lisp` | 54 | Cylinders (four kinds). |
+| `src/actuators.lisp` | 61 | Cylinders (four kinds), tagged `A1`, `A2`... so a proximity switch can name one. |
 | `src/sources.lisp` | 63 | Supply, exhaust, pump, reservoir. |
-| `src/electric.lisp` | 198 | Rails, contacts, buttons, coils, and `update-electric` — the electrical behaviour. |
+| `src/electric.lisp` | 257 | Rails, contacts, buttons, coils, proximity switches, and `update-electric` — the electrical behaviour. |
 | `src/library.lisp` | 79 | The two demo circuits. Good worked examples of the API. |
 | `src/editing.lisp` | 110 | Hit testing, move/wire/remove, labelling. Renderer-free so it stays testable. |
-| `src/persist.lisp` | 106 | Save and load, as an s-expression. |
+| `src/persist.lisp` | 113 | Save and load, as an s-expression. |
 
 ### UI — `open-fluidsim/ui`, needs cl-raylib
 
@@ -319,12 +322,12 @@ nothing below. That order is in `open-fluidsim.asd` and is worth respecting.
 |---|---|---|
 | `ui/package.lisp` | 9 | Package with the `ofs:` / `rl:` / `v:` local nicknames. |
 | `ui/render.lisp` | 91 | **The only file that knows raylib exists.** Turns drawing ops into draw calls. |
-| `ui/palette.lisp` | 87 | The component palette down the left edge, and its layout constants. |
-| `ui/app.lisp` | 435 | The editor: state struct, mouse and key handling, HUD, and the main loop. |
+| `ui/palette.lisp` | 135 | The component palette down the left edge: layout constants, scrolling, and the entry hit test. |
+| `ui/app.lisp` | 461 | The editor: state struct, mouse and key handling, HUD, and the main loop. |
 
 ### Tests
 
-`tests/tests.lisp` (485 lines) uses FiveAM. `(test name ...)` defines a test,
+`tests/tests.lisp` (621 lines) uses FiveAM. `(test name ...)` defines a test,
 `(is expr "message")` is an assertion, `(signals error ...)` asserts a throw.
 Several tests are labelled "Regression:" and pin down bugs that were fixed —
 if one of those fails, you have reintroduced a specific past bug, and the
@@ -338,19 +341,28 @@ The main loop is the bottom of `ui/app.lisp`. Per frame:
 
 ```
 sync-camera-to-window      keep the canvas centred (also during a live resize)
-handle-pan-and-zoom        right-drag pans, wheel zooms
+handle-pan-and-zoom        right-drag pans; the wheel zooms, or scrolls the palette
 handle-mouse               palette clicks, placing, wiring, dragging, buttons
 handle-keys                mode toggle, prompts, delete, fit
-  if RUN:  step-simulation
-  if EDIT: propagate with :supply 0.0     <- makes everything read dead
+read (editor-circuit editor) back     <- *after* the handlers, never before
+  if RUN:  step-simulation                 the loop; L replaces it wholesale
+  if EDIT: propagate with :supply 0.0   <- makes everything read dead
 draw:  canvas (in camera space) -> palette -> HUD
 ```
+
+> **Trap #5.** Do not hoist the circuit into a local outside the loop. Loading
+> swaps `editor-circuit` for a *different object*, and drawing already reads it
+> fresh — so a captured reference silently simulates the old circuit while the
+> canvas shows the new one, and pressing a button in the loaded drawing does
+> nothing at all. The loop also refits the view when the circuit changes
+> identity, or a loaded circuit laid out elsewhere lands off-screen.
 
 And `step-simulation` (`src/engine.lisp`) is:
 
 ```
 propagate          flood from sources, so the electrical side can see what is live
-update-electric    energise coils; open/close contacts; drive valve solenoids by tag
+update-electric    energise coils; open/close contacts and prox switches; drive
+                   valve solenoids by tag
 update-valves      move each valve's spool from its coils (or hold, if detented)
 propagate          again, so fluid paths reflect the valves' *new* positions
 update-cylinders   advance piston travel toward its target
@@ -368,12 +380,20 @@ labels**, resolved every frame in `update-electric`:
 a :coil labelled "K1"  ->  every :contact-no / :contact-nc labelled "K1"
 a :solenoid-out labelled "Y1a"  ->  the valve coil (a SOLENOID struct) named "Y1a"
 a valve labelled "Y1"  ->  names its own coils "Y1a" and "Y1b"
+a :sensor-no labelled "A1@50"  ->  the cylinder labelled "A1", at half stroke
 ```
 
-`refresh-solenoid-tags` (in `valves.lisp`) keeps the last of those in step, and
-`rename-component` calls it, so retagging a valve retags its coils.
+`refresh-solenoid-tags` (in `valves.lisp`) keeps the third of those in step,
+and `rename-component` calls it, so retagging a valve retags its coils.
 
-> **Trap #5.** The word "solenoid" means two different things.
+The last one runs the other way — fluid state actuating an electrical part — and
+is how a circuit becomes self-sequencing rather than needing a button press per
+move. `sensor-target` splits the tag at the `@`; everything after it is a
+percentage of stroke, defaulting to the extended end. Putting the mounting
+point in the tag rather than in a slot of its own means the retag prompt
+already edits it and the save format already stores it, with no version bump.
+
+> **Trap #6.** The word "solenoid" means two different things.
 > A `solenoid` **struct** is a coil *inside a valve* (`component-solenoids`).
 > A `:solenoid-out` **component** is the electrical symbol you place on the
 > canvas. They are joined only by name string.
@@ -402,11 +422,11 @@ Everything in `src/model.lisp`. You will refer back to this.
 | `solenoids` | List of `solenoid` structs — the valve's own coils. Empty for non-valves. |
 | `hold` | `:spring` (return to `rest-state` with no coil on) or `:detent` (hold position). |
 | `rest-state`, `left-state`, `right-state` | Which state each coil commands, and which is the rest position. |
-| `label` | The linking tag. See above. |
+| `label` | The linking tag. See above. On a proximity switch it also carries the mounting point after an `@`. |
 | `energised` | Coils only: is current flowing through it right now. |
 | `pressed` | Pushbuttons only: is the mouse held on it. |
 | `tables` | Alist of `state -> vector of connector indices`, `-1` meaning blocked. |
-| `travel` | Cylinders: piston extension, 0.0 to 1.0. |
+| `travel` | Cylinders: piston extension, 0.0 to 1.0. Also what a proximity switch reads. |
 | `travel-rate` | Cylinders: strokes per second. |
 | `shift` | **Currently unused.** See §10. |
 
@@ -426,7 +446,7 @@ blocked, connector 3 joins 0, connector 4 joins 1. Note the mapping is
 edge set, so an asymmetric table will produce flow that works in one direction
 only, which is almost never what you want.
 
-> **Trap #6.** These table vectors come from the valve *spec* and are
+> **Trap #7.** These table vectors come from the valve *spec* and are
 > **shared by every instance of that kind**. Never `setf` into one at runtime;
 > you would change every valve of that type in the circuit. Change
 > `component-state` to pick a different table instead.
@@ -502,8 +522,28 @@ drift out of sync.
 
 If the kind should get auto-numbered tags (K1, K2, …), pass
 `:label-prefix "K"`. Leave it off if the tag *refers* to something else (a
-contact naming its coil), because `assign-unique-label` would renumber it and
-break the link the user is about to make.
+contact naming its coil, a proximity switch naming its cylinder), because
+`assign-unique-label` would renumber it and break the link the user is about to
+make.
+
+### Give a component a parameter, without touching the save format
+
+Proximity switches need a number — where on the stroke they are mounted — and
+they get it out of the tag rather than out of a new struct slot: the tag
+`A1@50` means "on cylinder A1, at half stroke", parsed by `sensor-target` in
+`src/electric.lisp`.
+
+This is worth copying when a kind needs one small parameter. A new slot on
+`component` means teaching `circuit-form` to write it, `circuit-from-form` to
+read it, and probably bumping `+save-format-version+`. Riding in the label
+costs none of that — the `T` prompt already edits it and the save format
+already stores it — and it keeps a component "a shape plus a piece of text",
+which is the property the whole linking scheme rests on.
+
+The costs are real, so weigh them: the tag is free text a user types, so
+parsing must never signal (`sensor-target` falls back to the extended end on
+anything it cannot read, and there are tests for `A1@`, `A1@abc` and `A1@999`),
+and a parameter that is not naturally one short token does not belong here.
 
 ### Add a valve
 
@@ -559,9 +599,18 @@ free (`s`, `l`, `t`, `f`, space, escape, delete and backspace are taken).
 
 `src/persist.lisp`. If you add a field to what is written, and old files should
 still load, keep `+save-format-version+` as is and use `&key` destructuring —
-a missing key just comes out `NIL` and the loader already guards each field
-with `when`. If old files must be *rejected*, bump the version; the loader
-already errors on a mismatch.
+a missing key just comes out `NIL` and the loader guards each field with
+`when`. If old files must be *rejected*, bump the version; the loader already
+errors on a mismatch.
+
+`label` is the exception to that pattern: rather than `when`, it takes the
+saved tag if there is one and falls back to `assign-unique-label` if it is
+blank. That is what lets files written before a kind had tags at all come back
+numbered — cylinders had none until proximity switches needed something to
+name, and a switch mounted on a nameless cylinder could never find it. Note
+that this is a *widening* change of exactly the kind that does not need a
+version bump: new files carry the field, old files still load, and the meaning
+of every field that was already there is unchanged.
 
 Wires are stored as `(component-index port-index component-index port-index)`
 because connectors are objects with no identity outside the running image.
@@ -608,6 +657,17 @@ Beyond the numbered ones above:
   change it to collect only energised ones, spring-return valves will stay
   shifted forever — there would be nothing left to switch the coil off. There
   is a regression test for this too.
+- **A proximity switch senses a band, not a point** (`*sensor-band*`). Narrow
+  it and a mid-stroke switch becomes unreliable: `update-cylinders` advances
+  travel by `travel-rate × dt` per step, so a piston can jump clean over a
+  window narrower than one step. The band must stay comfortably wider than
+  the largest step you expect. End-of-stroke switches are safe either way,
+  since the piston parks exactly on 0.0 or 1.0 and stays there.
+- **`assign-unique-label` runs on load for anything saved with a blank tag.**
+  That is what lets circuits written before cylinders had tags come back with
+  `A1`, `A2`... rather than nameless, which a proximity switch could never
+  find. The cost is that deliberately blanking an auto-numbered tag does not
+  survive a save/load round trip.
 - **There is no keyboard override for valve coils.** That is deliberate: keys
   would silently fight `update-electric`. Shift a valve by wiring a
   `:solenoid-out` symbol to its coil tag.
@@ -628,9 +688,6 @@ before you go looking for the other half.
 - `component-shift` — a slot on `component`, exported, never read or written
   anywhere. Valve body offset is computed from `+box-w+` in
   `valve-geometry-from-spec` instead.
-- `:sensor-nc` — named in the NC list in `contact-geometry`, but no such kind
-  is ever registered. Groundwork for sensors, which the README lists as not
-  yet existing.
 - `pt-` and `pt-scale` — exported from the core, unused by anything.
 - `add-source` / `circuit-sources` — still supported, but only the tests use
   them. In practice `source-connectors` treats any `:supply`, `:pump` or
@@ -672,8 +729,8 @@ before you go looking for the other half.
 
 If you read four files, read these, in this order:
 
-1. `src/model.lisp` — the data. 79 lines.
-2. `src/engine.lisp` — the simulation. 144 lines, and the comments explain the
+1. `src/model.lisp` — the data. 84 lines.
+2. `src/engine.lisp` — the simulation. 142 lines, and the comments explain the
    design decisions.
 3. `src/library.lisp` — two worked circuits that use the whole API.
 4. `src/valves.lisp` — the specification-driven approach that most of the

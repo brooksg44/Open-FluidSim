@@ -69,7 +69,7 @@ the view stays centred throughout a live drag-resize, not just once it ends."
   (let ((p (rl:get-screen-to-world-2d (rl:get-mouse-position) camera)))
     (ofs:pt (v:vx p) (- (v:vy p)))))
 
-(defun handle-pan-and-zoom (camera)
+(defun handle-pan-and-zoom (editor camera)
   (when (rl:is-mouse-button-down :mouse-button-right)
     (let ((delta (rl:get-mouse-delta))
           (zoom (rl:camera2d-zoom camera))
@@ -78,8 +78,13 @@ the view stays centred throughout a live drag-resize, not just once it ends."
       (decf (v:vy target) (/ (v:vy delta) zoom))))
   (let ((wheel (rl:get-mouse-wheel-move)))
     (unless (zerop wheel)
-      (setf (rl:camera2d-zoom camera)
-            (max 0.5 (min 16.0 (+ (rl:camera2d-zoom camera) (* wheel 0.4))))))))
+      (if (in-palette-p (v:vx (rl:get-mouse-position)))
+          ;; Over the palette the wheel scrolls the list. It used to zoom the
+          ;; canvas from here, which was both surprising and left any entry
+          ;; past the bottom of the window with no way to reach it.
+          (scroll-palette (editor-domain editor) (round (* wheel -40)))
+          (setf (rl:camera2d-zoom camera)
+                (max 0.5 (min 16.0 (+ (rl:camera2d-zoom camera) (* wheel 0.4)))))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Editing gestures
@@ -151,6 +156,9 @@ the view stays centred throughout a live drag-resize, not just once it ends."
          (cond (domain
                 (setf (editor-domain editor) domain
                       (editor-placing editor) nil
+                      ;; Back to the top: the position that was legal on the
+                      ;; old tab means nothing on a list of a different length.
+                      *palette-scroll* 0
                       (editor-status editor)
                       (format nil "~a components." (domain-label domain))))
                (kind
@@ -248,12 +256,23 @@ the view stays centred throughout a live drag-resize, not just once it ends."
         ((or (rl:is-key-pressed :key-enter) (rl:is-key-pressed :key-kp-enter))
          (finish-prompt editor))))
 
-(defun begin-prompt (editor purpose &key target (initial ""))
+(defun begin-prompt (editor purpose &key target (initial "") hint)
   (setf (editor-prompt editor) purpose
         (editor-prompt-target editor) target
         (editor-prompt-buffer editor) initial
         (editor-status editor)
-        (format nil "Type a ~a, Enter to accept." (prompt-label purpose))))
+        (format nil "Type a ~a, Enter to accept.~@[ ~a~]"
+                (prompt-label purpose) hint)))
+
+(defun retag-hint (component)
+  "What the tag of COMPONENT means, for kinds whose tag names something else."
+  (case (ofs:component-kind component)
+    ((:sensor-no :sensor-nc)
+     ;; The mounting point lives in the tag, so the prompt has to say so --
+     ;; there is nowhere else in the UI that this syntax could be discovered.
+     "A cylinder tag: A1 at full extension, A1@0 retracted, A1@50 mid-stroke.")
+    ((:contact-no :contact-nc) "The tag of the coil that drives it.")
+    (:solenoid-out "The tag of the valve coil it drives.")))
 
 (defun handle-keys (editor camera)
   (when (editor-prompt editor)
@@ -263,7 +282,8 @@ the view stays centred throughout a live drag-resize, not just once it ends."
       (let ((component (editor-selected editor)))
         (when component
           (begin-prompt editor :rename :target component
-                               :initial (ofs:component-label component)))))
+                               :initial (ofs:component-label component)
+                               :hint (retag-hint component)))))
     (when (rl:is-key-pressed :key-s) (begin-prompt editor :save))
     (when (rl:is-key-pressed :key-l) (begin-prompt editor :load))
     (when (rl:is-key-pressed :key-escape)
@@ -351,16 +371,13 @@ would look identical to a terminal nobody had wired up."
         (ofs:move-component preview (ofs:pt-x at) (ofs:pt-y at))
         (draw-ops (ofs:component-world-geometry preview) :color :gray)))))
 
-(defparameter *cylinder-kinds*
-  '(:cylinder-double :cylinder-single :cylinder-double-hyd :cylinder-single-hyd))
-
 (defun draw-cylinder-readouts (circuit)
   "Print each cylinder's extension beside it.
 
 On the canvas rather than in the HUD, because a circuit can hold several
 cylinders and a single HUD figure could not say which one it meant."
   (dolist (component (ofs:circuit-components circuit))
-    (when (member (ofs:component-kind component) *cylinder-kinds*)
+    (when (member (ofs:component-kind component) ofs:*cylinder-kinds*)
       (let ((p (v2 (ofs:pt+ (ofs:component-origin component) (ofs:pt 2.0 24.0)))))
         (rl:draw-text (format nil "~d%"
                               (round (* 100 (ofs:component-travel component))))
@@ -420,7 +437,7 @@ the pushbutton to drive the valve and extend the cylinder."
       (sync-camera-to-window camera)
       (loop until (rl:window-should-close)
             do (sync-camera-to-window camera)
-               (handle-pan-and-zoom camera)
+               (handle-pan-and-zoom editor camera)
                (handle-mouse editor camera)
                (handle-keys editor camera)
                ;; Read the circuit back *after* the input handlers, never once

@@ -72,12 +72,19 @@
                                    kind
                                    :origin (pt (first origin) (second origin)))))
                    (when name (setf (component-name component) name))
-                   ;; Through RENAME-COMPONENT so a valve's coil tags follow.
-                   (when label (rename-component component label))
                    (when state (setf (component-state component) state))
                    (when travel (setf (component-travel component) travel))
                    (setf (aref built i) component)
-                   (add-component circuit component))))
+                   (add-component circuit component)
+                   (if (and label (string/= "" label))
+                       ;; Through RENAME-COMPONENT so a valve's coil tags follow.
+                       (rename-component component label)
+                       ;; A blank tag on a kind that auto-numbers means the file
+                       ;; predates that kind carrying a tag at all -- cylinders
+                       ;; had none until proximity switches needed something to
+                       ;; name. Number it rather than load it nameless, or a
+                       ;; switch mounted on it could never find it.
+                       (assign-unique-label circuit component)))))
       (dolist (wire wires)
         (destructuring-bind (a-index a-port b-index b-port) wire
           (connect circuit

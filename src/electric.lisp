@@ -40,6 +40,12 @@
                    '(:push-button :push-button-closed))
        (list (polyline (list (pt 0.0 5.0) (pt 0.0 11.0)))
              (polyline (list (pt -5.0 11.0) (pt 5.0 11.0)) :width 2.0)))
+     ;; Proximity switches get a diamond on the actuator line: nothing touches
+     ;; the contact, so it must not read as a button cap.
+     (when (member (component-kind component) '(:sensor-no :sensor-nc))
+       (list (polyline (list (pt 0.0 5.0) (pt 0.0 8.0)))
+             (polyline (list (pt 0.0 8.0) (pt 4.0 11.0)
+                             (pt 0.0 14.0) (pt -4.0 11.0) (pt 0.0 8.0)))))
      ;; Label, so linked pairs can be told apart.
      (list (caption (pt -7.0 -13.0) (component-label component) :size 5)))))
 
@@ -122,12 +128,63 @@
 (register-electric :solenoid-out :label "Solenoid" :state :load
                                  :label-default "Sol 1"
                                  :ports #'inline-ports :geometry #'coil-geometry)
+;; No LABEL-PREFIX on the switches: like a contact naming its coil, the tag
+;; refers to the cylinder they are mounted on, so renumbering would break it.
+(register-electric :sensor-no :label "Prox Switch" :state :open
+                             :label-default "A1"
+                             :ports #'inline-ports :geometry #'contact-geometry)
+(register-electric :sensor-nc :label "Prox Switch (NC)" :state :closed
+                             :label-default "A1"
+                             :ports #'inline-ports :geometry #'contact-geometry)
 
 ;;; ------------------------------------------------------------------
 ;;; Behaviour
 ;;; ------------------------------------------------------------------
 
 (defun coil-kind-p (kind) (member kind '(:coil :solenoid-out)))
+
+(defparameter *switch-kinds*
+  '(:contact-no :contact-nc :push-button :push-button-closed :sensor-no :sensor-nc)
+  "Kinds whose open/closed state is recomputed from something else every step,
+rather than being set by hand.")
+
+(defparameter *sensor-band* 0.05
+  "How much of the stroke a proximity switch sees, either side of where it is
+mounted. A reed switch has a sensing window rather than a trip point, and the
+width matters here for the same reason it does on a machine: too narrow and a
+fast piston steps clean over it between one frame and the next.")
+
+(defun sensor-target (component)
+  "Which cylinder a proximity switch watches, and where on the stroke it sits.
+
+Returns (values tag position), position running 0.0 retracted to 1.0 extended.
+The mounting point rides in the label after an @, as a percentage of stroke:
+\"A1\" is the extended end, \"A1@0\" the retracted end, \"A1@50\" mid-stroke.
+Keeping it in the label rather than in a slot of its own means the retag prompt
+already edits it and the save format already stores it -- a switch is a switch
+plus a piece of text, exactly like a contact naming its coil."
+  (let* ((label (component-label component))
+         (at (position #\@ label)))
+    (if at
+        (values (subseq label 0 at)
+                (let ((percent (parse-integer label :start (1+ at)
+                                                    :junk-allowed t)))
+                  (if percent
+                      (max 0.0 (min 1.0 (/ percent 100.0)))
+                      1.0)))
+        (values label 1.0))))
+
+(defun sensor-tripped-p (circuit component)
+  "True when the piston of the cylinder this switch names has reached it.
+
+A switch whose tag matches no cylinder never trips, which is what an unmounted
+switch should do."
+  (multiple-value-bind (tag position) (sensor-target component)
+    (some (lambda (other)
+            (and (member (component-kind other) *cylinder-kinds*)
+                 (string= tag (component-label other))
+                 (<= (abs (- (component-travel other) position)) *sensor-band*)))
+          (circuit-components circuit))))
 
 (defun grounded-connectors (circuit)
   "Connectors with a path back to 0V, as a set, or NIL if nothing is grounded.
@@ -157,8 +214,9 @@ coil to +24V alone leaves it dead, as it should."
                      (or (and (gethash a live) (gethash b grounded))
                          (and (gethash b live) (gethash a grounded)))
                      t)))))
-    ;; 2. Contacts follow the coil that shares their label; buttons follow the
-    ;;    pointer. Both resolve to open or closed.
+    ;; 2. Contacts follow the coil that shares their label, buttons follow the
+    ;;    pointer, and proximity switches follow the piston they are mounted
+    ;;    beside. All three resolve to open or closed.
     (flet ((coil-live-p (label)
              (some (lambda (c) (and (eq (component-kind c) :coil)
                                     (string= label (component-label c))
@@ -171,9 +229,10 @@ coil to +24V alone leaves it dead, as it should."
                   (:contact-nc (not (coil-live-p (component-label component))))
                   (:push-button (component-pressed component))
                   (:push-button-closed (not (component-pressed component)))
+                  (:sensor-no (sensor-tripped-p circuit component))
+                  (:sensor-nc (not (sensor-tripped-p circuit component)))
                   (t nil))))
-          (when (member (component-kind component)
-                        '(:contact-no :contact-nc :push-button :push-button-closed))
+          (when (member (component-kind component) *switch-kinds*)
             (setf (component-state component) (if closed :closed :open))))))
     ;; 3. Solenoid symbols drive the valve coil carrying the same tag.
     ;;
