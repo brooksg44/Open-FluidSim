@@ -20,8 +20,8 @@
 (defstruct (polyline (:constructor polyline (points &key (width 1.0))))
   points (width 1.0))
 
-(defstruct (poly (:constructor poly (points)))          ; filled polygon
-  points)
+(defstruct (poly (:constructor poly (points &key (filled t))))
+  points (filled t))
 
 (defstruct (disc (:constructor disc (center radius &key filled)))
   center radius filled)
@@ -38,7 +38,7 @@
     (etypecase op
       (polyline (polyline (mapcar #'shift (polyline-points op))
                           :width (polyline-width op)))
-      (poly     (poly (mapcar #'shift (poly-points op))))
+      (poly     (poly (mapcar #'shift (poly-points op)) :filled (poly-filled op)))
       (disc     (disc (shift (disc-center op)) (disc-radius op)
                       :filled (disc-filled op)))
       (box      (box (+ (box-x op) dx) (+ (box-y op) dy)

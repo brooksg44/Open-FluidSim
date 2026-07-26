@@ -18,9 +18,45 @@ whole component exists for, and it is what a spring-return valve would not do.
 Live pressure is drawn in red: pressurised wires and filled connection points,
 against grey and hollow rings for the rest.
 
-What does not exist yet: save/load, the electrical side (relays, contacts),
-undo, and orthogonal wire routing — wires are drawn straight between ports.
-Four component kinds so far.
+What does not exist yet: save/load, undo, orthogonal wire routing (wires are
+drawn straight between ports), sensors, and any way to edit a component's
+label from the UI — so relay links use their defaults (`K1`, `Sol 1`).
+
+## Components
+
+26 kinds across three domains, each on its own palette tab.
+
+**Pneumatic / Hydraulic** — 2/2, 3/2, 5/2, 5/2 double-solenoid, 5/2 detented
+and 5/3 closed-centre valves; double- and single-acting cylinders; supply and
+exhaust (pneumatic); pump and reservoir (hydraulic).
+
+**Electric** — +24V and 0V rails, NO/NC contacts, NO/NC pushbuttons, relay
+coil, solenoid.
+
+Valves are **data, not code**. They are all the same drawing — N position
+boxes, flow arrows inside, actuators on the ends, fixed ports the body slides
+behind — so a `valve-spec` gives the port layout, connection tables and
+actuator stacks, and one geometry function draws every one of them. Adding a
+valve is a new spec, not a new function.
+
+Pneumatic and hydraulic versions share a spec and differ only in arrowhead
+fill: hollow for pneumatic, solid for hydraulic, per ISO 1219.
+
+## The electrical side
+
+Electric components reuse the fluid engine unchanged — a wire is a wire, and
+an open contact blocks exactly like a shut valve port, so the same flood fill
+serves both.
+
+Energisation is the one thing that differs. A coil needs current *in* and
+*out*, so it is energised only when one terminal is reachable from a supply
+rail and the other from 0V — two floods, not one. Wiring a coil to +24V alone
+leaves it dead, as it should.
+
+Components link by **label**: a coil labelled `K1` actuates every contact
+labelled `K1`, and a solenoid labelled `Sol 1` drives the valve coil of that
+name. `make-relay-demo-circuit` wires up the full chain — button → K1 coil →
+K1 contact → Sol 1 → valve → cylinder.
 
 ## The editor
 
@@ -37,10 +73,23 @@ Two modes, toggled with `space`:
 | drag a component | move it |
 | click a port, then another port | wire them together |
 | click that same pair again | unwire them |
+| `T` | retag the selected component |
 | `Del` / `Backspace` | remove the selected component and its wires |
 | `Esc` | cancel a placement or a half-finished wire |
 | right-drag / wheel / `F` | pan, zoom, fit to window |
-| `1` and `2` (RUN only) | the two solenoid coils |
+| click a pushbutton (RUN only) | press it while the mouse is held |
+
+Valves are shifted **only** by wiring a solenoid symbol to their coil tag and
+energising it — there is no keyboard override, which would silently fight the
+electrical simulation.
+
+Cylinders print their extension as a percentage beside them, on the canvas
+rather than in the HUD, since a circuit can hold more than one.
+
+Conductors are shaded by what they carry: **red** for supply, **blue** for a
+return to 0V, hollow grey for neither. The blue matters because a coil does
+not conduct, so its return leg is grounded without ever being live — with a
+single colour it would look identical to a terminal nobody had wired up.
 
 Left mouse does the editing and **right mouse pans** — left already has four
 jobs and can't also be the pan gesture.

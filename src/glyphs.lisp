@@ -54,7 +54,18 @@ GLYPH-SPRING, which is a continuous zigzag with no flats."
                  (pt (+ mid pawl-half) 0.0)
                  (pt (- mid pawl-half) 0.0))))))
 
-(defun glyph-arrow (from to &key (head 5.0))
+(defun glyph-blocked (at &key (up t) (length 5.0))
+  "A blocked port: a stub inward from the box edge, capped with a bar.
+
+This is the shape that tells you at a glance which ports a position shuts off."
+  (let* ((dy (if up (- length) length))
+         (inner (pt (pt-x at) (+ (pt-y at) dy)))
+         (half 3.0))
+    (list (polyline (list at inner))
+          (polyline (list (pt (- (pt-x inner) half) (pt-y inner))
+                          (pt (+ (pt-x inner) half) (pt-y inner)))))))
+
+(defun glyph-arrow (from to &key (head 5.0) (filled t))
   "Flow arrow from FROM to TO with a solid head at TO.
 
 The head is deliberately several times the stroke width -- at symbol scale an
@@ -70,7 +81,8 @@ arrow whose head is only slightly wider than its shaft reads as a plain line."
     (list (polyline (list from to))
           (poly (list to
                       (pt (+ (pt-x base) (* px half)) (+ (pt-y base) (* py half)))
-                      (pt (- (pt-x base) (* px half)) (- (pt-y base) (* py half))))))))
+                      (pt (- (pt-x base) (* px half)) (- (pt-y base) (* py half))))
+                :filled filled))))
 
 (defconstant +port-stub-length+ 6.0
   "How far a port line runs outside the body. Wires attach at its far end, not

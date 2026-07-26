@@ -13,6 +13,11 @@
                              (:file "glyphs")
                              (:file "model")
                              (:file "engine")
+                             (:file "registry")
+                             (:file "valves")
+                             (:file "actuators")
+                             (:file "sources")
+                             (:file "electric")
                              (:file "library")
                              (:file "editing")))))
 

@@ -18,12 +18,15 @@ the rings read as part of the drawing rather than sitting on top of it.")
 (defstruct editor
   circuit
   (mode :edit)
+  (domain :pneumatic)                   ; which palette tab is showing
   (placing nil)                         ; kind awaiting a click on the canvas
   (selected nil)
   (pending nil)                         ; first connector of a wire in progress
   (dragging nil)
   (drag-dx 0.0)
   (drag-dy 0.0)
+  (renaming nil)                        ; component whose tag is being typed
+  (label-buffer "")
   (status "Click a palette entry, then click the canvas to place it."))
 
 ;;; ------------------------------------------------------------------
@@ -83,10 +86,14 @@ the view stays centred throughout a live drag-resize, not just once it ends."
   (let ((component (ofs:make-component-of-kind (editor-placing editor)
                                                :origin at)))
     (ofs:add-component (editor-circuit editor) component)
+    (ofs:assign-unique-label (editor-circuit editor) component)
     (setf (editor-selected editor) component
           (editor-placing editor) nil
           (editor-status editor)
-          (format nil "Placed ~a." (ofs:component-name component)))
+          (format nil "Placed ~a~@[ (~a)~]. Press T to retag."
+                  (ofs:component-name component)
+                  (let ((tag (ofs:component-label component)))
+                    (unless (string= "" tag) tag))))
     component))
 
 (defun begin-wire-or-select (editor at)
@@ -119,22 +126,45 @@ the view stays centred throughout a live drag-resize, not just once it ends."
                    (format nil "Selected ~a. Drag to move, Delete to remove."
                            (ofs:component-name component))))))))))
 
+(defun press-button-at (editor at)
+  "Press a pushbutton under the pointer. Returns the component, or NIL."
+  (let ((component (ofs:component-at (editor-circuit editor)
+                                     (ofs:pt-x at) (ofs:pt-y at))))
+    (when (and component
+               (member (ofs:component-kind component)
+                       '(:push-button :push-button-closed)))
+      (setf (ofs:component-pressed component) t)
+      component)))
+
 (defun handle-mouse (editor camera)
   (let ((screen (rl:get-mouse-position)))
     (cond
       ;; Palette clicks never reach the canvas.
       ((and (rl:is-mouse-button-pressed :mouse-button-left)
             (in-palette-p (v:vx screen)))
-       (let ((kind (palette-kind-at (v:vx screen) (v:vy screen))))
-         (when kind
-           (setf (editor-placing editor) kind
-                 (editor-pending editor) nil
-                 (editor-status editor) "Click on the canvas to place it."))))
+       (let ((domain (palette-domain-at (v:vx screen) (v:vy screen)))
+             (kind (palette-kind-at (editor-domain editor)
+                                    (v:vx screen) (v:vy screen))))
+         (cond (domain
+                (setf (editor-domain editor) domain
+                      (editor-placing editor) nil
+                      (editor-status editor)
+                      (format nil "~a components." (domain-label domain))))
+               (kind
+                (setf (editor-placing editor) kind
+                      (editor-pending editor) nil
+                      (editor-status editor) "Click on the canvas to place it.")))))
       ((rl:is-mouse-button-pressed :mouse-button-left)
        (let ((at (mouse-model-position camera)))
-         (if (editor-placing editor)
-             (place-component editor at)
-             (begin-wire-or-select editor at))))))
+         (cond ((editor-placing editor) (place-component editor at))
+               ;; In RUN, clicking a pushbutton presses it instead of selecting.
+               ((and (eq (editor-mode editor) :run)
+                     (press-button-at editor at)))
+               (t (begin-wire-or-select editor at)))))))
+  ;; Buttons are momentary: released as soon as the mouse comes up.
+  (unless (rl:is-mouse-button-down :mouse-button-left)
+    (dolist (component (ofs:circuit-components (editor-circuit editor)))
+      (setf (ofs:component-pressed component) nil)))
   ;; Drag the selected component.
   (when (and (editor-dragging editor)
              (rl:is-mouse-button-down :mouse-button-left))
@@ -145,8 +175,47 @@ the view stays centred throughout a live drag-resize, not just once it ends."
   (unless (rl:is-mouse-button-down :mouse-button-left)
     (setf (editor-dragging editor) nil)))
 
+(defun handle-rename-keys (editor)
+  "Type a new tag. Enter commits, Escape abandons."
+  (loop for code = (rl:get-char-pressed)
+        until (zerop code)
+        do (when (and (>= code 32) (< code 127))
+             (setf (editor-label-buffer editor)
+                   (concatenate 'string (editor-label-buffer editor)
+                                (string (code-char code))))))
+  (when (and (rl:is-key-pressed :key-backspace)
+             (plusp (length (editor-label-buffer editor))))
+    (setf (editor-label-buffer editor)
+          (subseq (editor-label-buffer editor)
+                  0 (1- (length (editor-label-buffer editor))))))
+  (cond ((rl:is-key-pressed :key-escape)
+         (setf (editor-renaming editor) nil
+               (editor-status editor) "Retag cancelled."))
+        ((or (rl:is-key-pressed :key-enter) (rl:is-key-pressed :key-kp-enter))
+         (let ((component (editor-renaming editor)))
+           (ofs:rename-component component (editor-label-buffer editor))
+           (setf (editor-renaming editor) nil
+                 (editor-status editor)
+                 (format nil "Tagged ~a.~@[ Coils: ~a~]"
+                         (editor-label-buffer editor)
+                         (let ((coils (ofs:component-solenoids component)))
+                           (when coils
+                             (format nil "~{~a~^, ~}"
+                                     (mapcar #'ofs:solenoid-name coils)))))))))) 
+
+(defun begin-rename (editor)
+  (let ((component (editor-selected editor)))
+    (when component
+      (setf (editor-renaming editor) component
+            (editor-label-buffer editor) (ofs:component-label component)
+            (editor-status editor) "Type a tag, Enter to accept."))))
+
 (defun handle-keys (editor camera)
+  (when (editor-renaming editor)
+    (return-from handle-keys (handle-rename-keys editor)))
   (let ((circuit (editor-circuit editor)))
+    (when (rl:is-key-pressed :key-t)
+      (begin-rename editor))
     (when (rl:is-key-pressed :key-escape)
       (setf (editor-placing editor) nil
             (editor-pending editor) nil
@@ -165,32 +234,40 @@ the view stays centred throughout a live drag-resize, not just once it ends."
             (editor-pending editor) nil
             (editor-status editor)
             (if (eq (editor-mode editor) :run)
-                "Running. Hold 1 and 2 for the solenoid coils."
+                "Running. Click a pushbutton to operate it."
                 "Editing. Simulation stopped.")))
     (when (rl:is-key-pressed :key-f)
       (fit-view camera circuit))
-    ;; Coils are momentary, and drive every valve in the circuit.
-    (when (eq (editor-mode editor) :run)
-      (dolist (component (ofs:circuit-components circuit))
-        (let ((solenoids (ofs:component-solenoids component)))
-          (when (= 2 (length solenoids))
-            (setf (ofs:solenoid-active (first solenoids)) (rl:is-key-down :key-one)
-                  (ofs:solenoid-active (second solenoids)) (rl:is-key-down :key-two))))))))
+    ;; No keyboard override for coils: a valve is shifted by wiring a solenoid
+    ;; symbol to its tag and energising it, which is the whole point of the
+    ;; electric domain. Keys here would silently fight UPDATE-ELECTRIC.
+    circuit))
 
 ;;; ------------------------------------------------------------------
 ;;; Drawing
 ;;; ------------------------------------------------------------------
 
-(defun draw-wires (circuit)
+(defun conductor-colour (a b grounded)
+  "Red carries supply, blue returns to 0V, grey is neither."
+  (cond ((or (ofs:pressurised-p a) (ofs:pressurised-p b)) :maroon)
+        ((and grounded (or (gethash a grounded) (gethash b grounded))) :blue)
+        (t :darkgray)))
+
+(defun draw-wires (circuit grounded)
   (dolist (wire (ofs:circuit-wires circuit))
     (let ((a (car wire)) (b (cdr wire)))
       (rl:draw-line-ex (v2 (ofs:connector-position a))
                        (v2 (ofs:connector-position b))
                        *wire-width*
-                       (if (or (ofs:pressurised-p a) (ofs:pressurised-p b))
-                           :maroon :darkgray)))))
+                       (conductor-colour a b grounded)))))
 
-(defun draw-connection-points (circuit pending)
+(defun draw-connection-points (circuit pending grounded)
+  "Every connector is a connection point: a ring, filled when it carries.
+
+Filled red is supply, filled blue is a return to 0V, hollow is neither. A
+coil's return leg shows blue rather than red because a coil does not conduct,
+so that leg is grounded without ever being live -- and an unshaded return
+would look identical to a terminal nobody had wired up."
   (dolist (component (ofs:circuit-components circuit))
     (dotimes (index (length (ofs:component-connectors component)))
       (let ((connector (ofs:component-connector component index))
@@ -199,6 +276,8 @@ the view stays centred throughout a live drag-resize, not just once it ends."
                (rl:draw-circle-v centre (* 1.6 *port-radius*) :orange))
               ((ofs:pressurised-p connector)
                (rl:draw-circle-v centre *port-radius* :maroon))
+              ((and grounded (gethash connector grounded))
+               (rl:draw-circle-v centre *port-radius* :blue))
               (t
                (rl:draw-circle-lines-v centre *port-radius* :maroon)))))))
 
@@ -222,13 +301,32 @@ the view stays centred throughout a live drag-resize, not just once it ends."
         (ofs:move-component preview (ofs:pt-x at) (ofs:pt-y at))
         (draw-ops (ofs:component-world-geometry preview) :color :gray)))))
 
+(defparameter *cylinder-kinds*
+  '(:cylinder-double :cylinder-single :cylinder-double-hyd :cylinder-single-hyd))
+
+(defun draw-cylinder-readouts (circuit)
+  "Print each cylinder's extension beside it.
+
+On the canvas rather than in the HUD, because a circuit can hold several
+cylinders and a single HUD figure could not say which one it meant."
+  (dolist (component (ofs:circuit-components circuit))
+    (when (member (ofs:component-kind component) *cylinder-kinds*)
+      (let ((p (v2 (ofs:pt+ (ofs:component-origin component) (ofs:pt 2.0 24.0)))))
+        (rl:draw-text (format nil "~d%"
+                              (round (* 100 (ofs:component-travel component))))
+                      (round (v:vx p)) (round (v:vy p)) 7 :maroon)))))
+
 (defun draw-canvas (editor camera)
-  (let ((circuit (editor-circuit editor)))
-    (draw-wires circuit)
+  (let* ((circuit (editor-circuit editor))
+         ;; Recomputed per frame: contacts open and close, so what is grounded
+         ;; changes with them.
+         (grounded (ofs:grounded-connectors circuit)))
+    (draw-wires circuit grounded)
     (dolist (component (ofs:circuit-components circuit))
       (draw-ops (ofs:component-world-geometry component)))
     (draw-selection (editor-selected editor))
-    (draw-connection-points circuit (editor-pending editor))
+    (draw-cylinder-readouts circuit)
+    (draw-connection-points circuit (editor-pending editor) grounded)
     (draw-ghost editor camera)))
 
 (defun draw-hud (editor)
@@ -236,11 +334,14 @@ the view stays centred throughout a live drag-resize, not just once it ends."
     (rl:draw-rectangle 0 0 (rl:get-screen-width) *hud-height* :raywhite)
     (rl:draw-text (if running "RUN" "EDIT") 12 10 20 (if running :maroon :darkgray))
     ;; Clear of the mode label, which is 20px type and wider than it looks.
-    (rl:draw-text "space run/stop   F fit   Esc cancel   Del remove   right-drag pan   wheel zoom"
+    (rl:draw-text "space run/stop   T retag   F fit   Esc cancel   Del remove   right-drag pan   wheel zoom"
                   84 14 12 :gray)
     (rl:draw-text "click a port then another to wire them; click a wired pair again to unwire"
                   12 34 12 :gray)
-    (rl:draw-text (editor-status editor) 12 52 12 :darkgray)
+    (rl:draw-text (if (editor-renaming editor)
+                      (format nil "tag: ~a_" (editor-label-buffer editor))
+                      (editor-status editor))
+                  12 52 12 (if (editor-renaming editor) :maroon :darkgray))
     (rl:draw-line-ex (v:vec2 0.0 (float *hud-height* 1.0))
                      (v:vec2 (float (rl:get-screen-width) 1.0) (float *hud-height* 1.0))
                      1.0 :gray)))
@@ -248,8 +349,11 @@ the view stays centred throughout a live drag-resize, not just once it ends."
 ;;; ------------------------------------------------------------------
 
 (defun run (&key (width 1100) (height 720) circuit)
-  "Open the editor. Starts on the worked demo circuit unless one is supplied."
-  (let* ((circuit (or circuit (ofs:make-demo-circuit)))
+  "Open the editor.
+
+Starts on the relay demo unless a circuit is supplied: switch to RUN and click
+the pushbutton to drive the valve and extend the cylinder."
+  (let* ((circuit (or circuit (ofs:make-relay-demo-circuit)))
          (editor (make-editor :circuit circuit))
          (camera (rl:make-camera2d :offset (v:vec2 0.0 0.0)
                                    :target (v:vec2 0.0 0.0)
@@ -276,5 +380,5 @@ the view stays centred throughout a live drag-resize, not just once it ends."
                  (rl:clear-background :raywhite)
                  (rl:with-mode-2d (camera)
                    (draw-canvas editor camera))
-                 (draw-palette (editor-placing editor))
+                 (draw-palette (editor-domain editor) (editor-placing editor))
                  (draw-hud editor))))))

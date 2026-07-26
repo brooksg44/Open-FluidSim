@@ -82,8 +82,8 @@
   (multiple-value-bind (circuit valve cylinder) (ofs:make-demo-circuit)
     (is (= 5 (length (ofs:circuit-components circuit))))
     (is (= 5 (length (ofs:circuit-wires circuit))))
-    (is (eq :valve-5-2-double-solenoid (ofs:component-kind valve)))
-    (is (eq :cylinder-double-acting (ofs:component-kind cylinder)))))
+    (is (eq :valve-5-2-detented (ofs:component-kind valve)))
+    (is (eq :cylinder-double (ofs:component-kind cylinder)))))
 
 (test supply-reaches-the-cylinder
   ;; In the rest position P routes to B, so the rod-end port is live and the
@@ -138,18 +138,182 @@
 
 ;;; Editing operations, which the palette and canvas gestures are built on.
 
-(test every-palette-kind-is-constructible
-  ;; If a kind reaches the palette without a MAKE-COMPONENT-OF-KIND clause,
-  ;; clicking it would fail at placement time. Catch it here instead.
-  (dolist (entry ofs:*palette*)
-    (let ((component (ofs:make-component-of-kind (car entry))))
-      (is (eq (car entry) (ofs:component-kind component)))
-      (is (plusp (length (ofs:component-world-geometry component)))))))
+(test every-registered-kind-is-usable
+  ;; Everything in the registry reaches a palette tab, so a kind that cannot be
+  ;; built, positioned or drawn would fail at click time. Catch it here.
+  (dolist (kind (ofs:all-kinds))
+    (let ((component (ofs:make-component-of-kind kind)))
+      (is (eq kind (ofs:component-kind component)))
+      (is (plusp (length (ofs:component-world-geometry component)))
+          "~a produced no geometry" kind)
+      (is (= (length (ofs:component-ports component))
+             (length (ofs:component-connectors component)))
+          "~a: port count does not match connector count" kind)
+      ;; Its current state must have a port table, or propagation will error.
+      (is (= (length (ofs:component-table component))
+             (length (ofs:component-connectors component)))
+          "~a: port table does not match connector count" kind))))
+
+(test every-domain-has-components
+  (dolist (domain (ofs:domains))
+    (is (plusp (length (ofs:palette-for-domain domain)))
+        "domain ~a has no components" domain)))
+
+;;; The electrical side.
+
+(defun find-kind (circuit kind)
+  (find kind (ofs:circuit-components circuit) :key #'ofs:component-kind))
+
+(defun make-circuit-with-spring-valve ()
+  "+24V -> button -> solenoid symbol -> 0V, tagged to a 3/2 spring-return valve."
+  (let* ((circuit (ofs:make-circuit))
+         (valve  (ofs:add-component circuit (ofs:make-component-of-kind :valve-3-2)))
+         (power  (ofs:add-component circuit (ofs:make-component-of-kind :power-24v)))
+         (button (ofs:add-component circuit (ofs:make-component-of-kind :push-button)))
+         (sol    (ofs:add-component circuit (ofs:make-component-of-kind :solenoid-out)))
+         (ground (ofs:add-component circuit (ofs:make-component-of-kind :common-0v))))
+    (ofs:assign-unique-label circuit valve)
+    (ofs:rename-component sol (ofs:solenoid-name (first (ofs:component-solenoids valve))))
+    (ofs:connect circuit (ofs:component-connector power 0) (ofs:component-connector button 0))
+    (ofs:connect circuit (ofs:component-connector button 1) (ofs:component-connector sol 0))
+    (ofs:connect circuit (ofs:component-connector sol 1) (ofs:component-connector ground 0))
+    circuit))
+
+(test a-coil-needs-both-a-supply-and-a-return
+  ;; Wired to +24V alone the coil is dead; it takes a path back to 0V.
+  (let* ((circuit (ofs:make-circuit))
+         (power (ofs:add-component circuit (ofs:make-component-of-kind :power-24v)))
+         (coil (ofs:add-component circuit (ofs:make-component-of-kind :coil)))
+         (ground (ofs:add-component circuit (ofs:make-component-of-kind :common-0v))))
+    (ofs:connect circuit (ofs:component-connector power 0)
+                 (ofs:component-connector coil 0))
+    (ofs:step-simulation circuit)
+    (is (not (ofs:component-energised coil)) "no return path yet")
+    (ofs:connect circuit (ofs:component-connector coil 1)
+                 (ofs:component-connector ground 0))
+    (ofs:step-simulation circuit)
+    (is (ofs:component-energised coil) "closed circuit should energise it")))
+
+(test relay-chain-drives-the-cylinder
+  ;; Button -> K1 coil -> K1 contact -> Sol 1 -> valve -> cylinder.
+  (multiple-value-bind (circuit button valve cylinder) (ofs:make-relay-demo-circuit)
+    (let ((coil (find-kind circuit :coil))
+          (contact (find-kind circuit :contact-no)))
+      (settle circuit :steps 5)
+      (is (not (ofs:component-energised coil)) "idle with the button released")
+      (is (eq :open (ofs:component-state contact)))
+      (is (eq :right (ofs:component-state valve)))
+      ;; Press and hold.
+      (setf (ofs:component-pressed button) t)
+      (settle circuit)
+      (is (ofs:component-energised coil) "button energises K1")
+      (is (eq :closed (ofs:component-state contact)) "K1 closes its contact")
+      (is (eq :left (ofs:component-state valve)) "Sol 1 shifts the valve")
+      (is (= 1.0 (ofs:component-travel cylinder)) "and the cylinder extends")
+      ;; Release: the coil drops out, but the valve detent holds.
+      (setf (ofs:component-pressed button) nil)
+      (settle circuit)
+      (is (not (ofs:component-energised coil)))
+      (is (eq :left (ofs:component-state valve))
+          "detented valve keeps its position after the coil drops out")
+      (is (= 1.0 (ofs:component-travel cylinder))))))
+
+(test spring-return-valve-drops-out-when-its-solenoid-does
+  ;; Regression: collecting only the *energised* solenoid tags meant that when
+  ;; the last one dropped out there was nothing left to switch the valve coil
+  ;; off, so a spring-return valve stayed shifted forever.
+  (let* ((circuit (make-circuit-with-spring-valve))
+         (valve (find-kind circuit :valve-3-2))
+         (button (find-kind circuit :push-button)))
+    (settle circuit :steps 5)
+    (is (eq :closed (ofs:component-state valve)) "starts in its spring position")
+    (setf (ofs:component-pressed button) t)
+    (settle circuit :steps 5)
+    (is (eq :open (ofs:component-state valve)) "solenoid shifts it")
+    (setf (ofs:component-pressed button) nil)
+    (settle circuit :steps 5)
+    (is (eq :closed (ofs:component-state valve))
+        "spring must return it once the solenoid drops out")))
+
+(test coils-sharing-a-return-bus-energise-independently
+  ;; Regression, from a real circuit: two solenoid coils whose returns tie
+  ;; together on the way to 0V -- ordinary wiring. Coils used to conduct, so
+  ;; the live flood ran through Y1a, along the shared return and back up
+  ;; through Y1b, energising both. On a detented valve that means both coils
+  ;; on at once, so the detent held and pressing S1 did nothing.
+  (let* ((circuit (ofs:make-circuit))
+         (valve (ofs:add-component circuit (ofs:make-component-of-kind
+                                            :valve-5-2-detented)))
+         (power (ofs:add-component circuit (ofs:make-component-of-kind :power-24v)))
+         (s1 (ofs:add-component circuit (ofs:make-component-of-kind :push-button)))
+         (s2 (ofs:add-component circuit (ofs:make-component-of-kind :push-button)))
+         (y1a (ofs:add-component circuit (ofs:make-component-of-kind :solenoid-out)))
+         (y1b (ofs:add-component circuit (ofs:make-component-of-kind :solenoid-out)))
+         (gnd (ofs:add-component circuit (ofs:make-component-of-kind :common-0v))))
+    (ofs:assign-unique-label circuit valve)
+    (destructuring-bind (coil-a coil-b) (ofs:component-solenoids valve)
+      (ofs:rename-component y1a (ofs:solenoid-name coil-a))
+      (ofs:rename-component y1b (ofs:solenoid-name coil-b)))
+    (ofs:connect circuit (ofs:component-connector power 0) (ofs:component-connector s1 0))
+    (ofs:connect circuit (ofs:component-connector power 0) (ofs:component-connector s2 0))
+    (ofs:connect circuit (ofs:component-connector s1 1) (ofs:component-connector y1a 0))
+    (ofs:connect circuit (ofs:component-connector s2 1) (ofs:component-connector y1b 0))
+    ;; The shared return bus.
+    (ofs:connect circuit (ofs:component-connector y1a 1) (ofs:component-connector y1b 1))
+    (ofs:connect circuit (ofs:component-connector y1b 1) (ofs:component-connector gnd 0))
+    (settle circuit :steps 5)
+    (is (not (ofs:component-energised y1a)))
+    (is (not (ofs:component-energised y1b)))
+    ;; Press S1: only Y1a may energise, and the valve must shift.
+    (setf (ofs:component-pressed s1) t)
+    (settle circuit :steps 5)
+    (is (ofs:component-energised y1a) "S1 should energise Y1a")
+    (is (not (ofs:component-energised y1b))
+        "Y1b shares only a return with Y1a and must stay dead")
+    (is (eq :left (ofs:component-state valve)) "the valve must actually shift")
+    ;; And the other button drives the other way.
+    (setf (ofs:component-pressed s1) nil
+          (ofs:component-pressed s2) t)
+    (settle circuit :steps 5)
+    (is (not (ofs:component-energised y1a)))
+    (is (ofs:component-energised y1b))
+    (is (eq :right (ofs:component-state valve)))))
+
+(test coil-tags-are-unique-per-valve
+  ;; Two valves must not answer to the same solenoid symbol.
+  (let* ((circuit (ofs:make-circuit))
+         (a (ofs:add-component circuit (ofs:make-component-of-kind :valve-3-2)))
+         (b (ofs:add-component circuit (ofs:make-component-of-kind :valve-3-2))))
+    (ofs:assign-unique-label circuit a)
+    (ofs:assign-unique-label circuit b)
+    (is (string/= (ofs:component-label a) (ofs:component-label b)))
+    (is (string/= (ofs:solenoid-name (first (ofs:component-solenoids a)))
+                  (ofs:solenoid-name (first (ofs:component-solenoids b))))
+        "coil tags must differ, or one symbol drives both valves")))
+
+(test retagging-a-valve-retags-its-coils
+  (let ((valve (ofs:make-component-of-kind :valve-5-2-detented)))
+    (ofs:rename-component valve "Y7")
+    (is (equal '("Y7a" "Y7b")
+               (mapcar #'ofs:solenoid-name (ofs:component-solenoids valve))))))
+
+(test normally-closed-contact-opens-when-energised
+  (let* ((circuit (ofs:make-circuit))
+         (power (ofs:add-component circuit (ofs:make-component-of-kind :power-24v)))
+         (coil (ofs:add-component circuit (ofs:make-component-of-kind :coil)))
+         (ground (ofs:add-component circuit (ofs:make-component-of-kind :common-0v)))
+         (contact (ofs:add-component circuit (ofs:make-component-of-kind :contact-nc))))
+    (ofs:connect circuit (ofs:component-connector power 0) (ofs:component-connector coil 0))
+    (ofs:connect circuit (ofs:component-connector coil 1) (ofs:component-connector ground 0))
+    (ofs:step-simulation circuit)
+    (is (ofs:component-energised coil))
+    (is (eq :open (ofs:component-state contact))
+        "an NC contact sharing the coil's label should open")))
 
 (test hit-testing-finds-components-and-ports
   (let* ((circuit (ofs:make-circuit))
          (valve (ofs:add-component circuit (ofs:make-component-of-kind
-                                            :valve-5-2-double-solenoid))))
+                                            :valve-5-2-detented))))
     (is (eq valve (ofs:component-at circuit 12.0 0.0)))
     (is (null (ofs:component-at circuit 900.0 900.0)))
     (let ((p (ofs:component-port-position valve 3)))
@@ -160,7 +324,7 @@
 (test wiring-toggles
   (let* ((circuit (ofs:make-circuit))
          (valve (ofs:add-component circuit (ofs:make-component-of-kind
-                                            :valve-5-2-double-solenoid)))
+                                            :valve-5-2-detented)))
          (supply (ofs:add-component circuit (ofs:make-component-of-kind :supply)))
          (a (ofs:component-connector valve 3))
          (b (ofs:component-connector supply 0)))
@@ -216,7 +380,7 @@
 (test geometry-shifts-with-position
   (let ((valve (ofs:make-valve-5-2-double-solenoid)))
     (flet ((left-edge (component)
-             (multiple-value-bind (min-x) (ofs:ops-bounds (ofs:valve-geometry component))
+             (multiple-value-bind (min-x) (ofs:ops-bounds (ofs:component-world-geometry component))
                min-x)))
       (let ((before (left-edge valve)))
         (setf (ofs:component-state valve) :left)

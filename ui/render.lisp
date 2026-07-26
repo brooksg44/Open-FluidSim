@@ -35,12 +35,19 @@
        (loop for (a b) on points while b
              do (rl:draw-line-ex (v2 a) (v2 b) width color))))
     (ofs:poly
-     ;; Every filled polygon in the symbol set is a triangle (arrow heads and
-     ;; the detent pawl). raylib culls by winding order, so draw both
-     ;; orientations rather than depend on how the points were listed.
+     ;; Every polygon in the symbol set is a triangle (arrow heads and the
+     ;; detent pawl). Hollow ones are pneumatic flow arrows, solid ones
+     ;; hydraulic -- the ISO 1219 distinction between the two.
      (destructuring-bind (a b c) (ofs:poly-points op)
-       (rl:draw-triangle (v2 a) (v2 b) (v2 c) color)
-       (rl:draw-triangle (v2 a) (v2 c) (v2 b) color)))
+       (if (ofs:poly-filled op)
+           ;; raylib culls by winding order, so draw both orientations rather
+           ;; than depend on how the points were listed.
+           (progn (rl:draw-triangle (v2 a) (v2 b) (v2 c) color)
+                  (rl:draw-triangle (v2 a) (v2 c) (v2 b) color))
+           (let ((w (stroke-width 1.0)))
+             (rl:draw-line-ex (v2 a) (v2 b) w color)
+             (rl:draw-line-ex (v2 b) (v2 c) w color)
+             (rl:draw-line-ex (v2 c) (v2 a) w color)))))
     (ofs:disc
      (let ((centre (v2 (ofs:disc-center op)))
            (radius (float (* *view-scale* (ofs:disc-radius op)) 1.0)))

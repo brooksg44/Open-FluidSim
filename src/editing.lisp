@@ -7,21 +7,35 @@
 
 (in-package #:open-fluidsim)
 
-(defparameter *palette*
-  '((:supply                    . "Supply")
-    (:exhaust                   . "Exhaust")
-    (:valve-5-2-double-solenoid . "5/2 Detented")
-    (:cylinder-double-acting    . "Cylinder"))
-  "Component kinds offered by the palette, in display order.")
+(defun palette-for-domain (domain)
+  "Kinds offered under one palette tab, as a list of (kind . label)."
+  (mapcar (lambda (kind) (cons kind (kind-label kind)))
+          (kinds-in-domain domain)))
 
-(defun make-component-of-kind (kind &key (origin (pt 0.0 0.0)))
-  "Construct a component by kind. The palette places components through this,
-so a new kind becomes available by adding one clause."
-  (ecase kind
-    (:supply                    (make-supply :origin origin))
-    (:exhaust                   (make-exhaust :origin origin))
-    (:valve-5-2-double-solenoid (make-valve-5-2-double-solenoid :origin origin))
-    (:cylinder-double-acting    (make-cylinder :origin origin))))
+(defun rename-component (component label)
+  "Retag COMPONENT. A valve's coils follow its label, so they are refreshed."
+  (setf (component-label component) label)
+  (when (component-solenoids component)
+    (refresh-solenoid-tags component))
+  component)
+
+(defun assign-unique-label (circuit component)
+  "Give COMPONENT the next free tag for its kind, e.g. K1, K2, K3.
+
+Kinds whose tag *refers* to something else -- contacts naming their coil, a
+solenoid symbol naming a valve coil -- have no prefix and keep their default,
+because renumbering them would break the reference the user is about to make."
+  (let ((prefix (kind-info-label-prefix (kind-info (component-kind component)))))
+    (when prefix
+      (loop for n from 1
+            for candidate = (format nil "~a~d" prefix n)
+            unless (find-if (lambda (other)
+                              (and (not (eq other component))
+                                   (string= candidate (component-label other))))
+                            (circuit-components circuit))
+              do (rename-component component candidate)
+                 (return))))
+  component)
 
 (defun component-bounds (component)
   (ops-bounds (component-world-geometry component)))
