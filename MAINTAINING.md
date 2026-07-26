@@ -8,7 +8,7 @@ is. This file explains *how the code is laid out*, *which Common Lisp you need
 to read it*, and *what to do when you want to change something*. Read the
 README first; it is short.
 
-The whole thing is about 2,900 lines across 20 files. That is small enough to
+The whole thing is about 3,000 lines across 20 files. That is small enough to
 read in an afternoon, and this guide is arranged so you can.
 
 ---
@@ -25,7 +25,7 @@ raylib` on macOS). The test suite needs neither raylib nor a display — the
 core has no renderer in it, which is deliberate and is the single most useful
 fact about the architecture.
 
-At the time of writing the suite is 39 tests / 259 checks, all passing. If you
+At the time of writing the suite is 43 tests / 272 checks, all passing. If you
 break something, `./run.sh --test` will usually tell you exactly what.
 
 ### The way you actually want to work
@@ -302,7 +302,7 @@ nothing below. That order is in `open-fluidsim.asd` and is worth respecting.
 
 | File | Lines | What it is |
 |---|---|---|
-| `src/package.lisp` | 52 | The package and its export list. Edit when you add a public name. |
+| `src/package.lisp` | 53 | The package and its export list. Edit when you add a public name. |
 | `src/geometry.lisp` | 71 | `pt`, the five drawing operations, `translate-ops`, `ops-bounds`. |
 | `src/glyphs.lisp` | 99 | Reusable ISO 1219 pieces: solenoid, spring, detent, arrow, blocked port, port stub. |
 | `src/model.lisp` | 84 | The `component`, `connector`, `solenoid` and `circuit` structs. **Read this one twice.** |
@@ -312,7 +312,7 @@ nothing below. That order is in `open-fluidsim.asd` and is worth respecting.
 | `src/actuators.lisp` | 61 | Cylinders (four kinds), tagged `A1`, `A2`... so a proximity switch can name one. |
 | `src/sources.lisp` | 63 | Supply, exhaust, pump, reservoir. |
 | `src/electric.lisp` | 257 | Rails, contacts, buttons, coils, proximity switches, and `update-electric` — the electrical behaviour. |
-| `src/library.lisp` | 79 | The two demo circuits. Good worked examples of the API. |
+| `src/library.lisp` | 142 | The three demo circuits. Good worked examples of the API. |
 | `src/editing.lisp` | 110 | Hit testing, move/wire/remove, labelling. Renderer-free so it stays testable. |
 | `src/persist.lisp` | 113 | Save and load, as an s-expression. |
 
@@ -327,7 +327,7 @@ nothing below. That order is in `open-fluidsim.asd` and is worth respecting.
 
 ### Tests
 
-`tests/tests.lisp` (621 lines) uses FiveAM. `(test name ...)` defines a test,
+`tests/tests.lisp` (708 lines) uses FiveAM. `(test name ...)` defines a test,
 `(is expr "message")` is an assertion, `(signals error ...)` asserts a throw.
 Several tests are labelled "Regression:" and pin down bugs that were fixed —
 if one of those fails, you have reintroduced a specific past bug, and the
@@ -732,7 +732,7 @@ If you read four files, read these, in this order:
 1. `src/model.lisp` — the data. 84 lines.
 2. `src/engine.lisp` — the simulation. 142 lines, and the comments explain the
    design decisions.
-3. `src/library.lisp` — two worked circuits that use the whole API.
+3. `src/library.lisp` — three worked circuits that use the whole API.
 4. `src/valves.lisp` — the specification-driven approach that most of the
    component library rests on.
 

@@ -45,7 +45,8 @@
    #:circuit-form #:circuit-from-form
    ;; library
    #:make-valve-5-2-double-solenoid #:make-supply #:make-exhaust #:make-cylinder
-   #:make-demo-circuit #:make-relay-demo-circuit #:solenoid-name
+   #:make-demo-circuit #:make-relay-demo-circuit #:make-auto-cycle-demo-circuit
+   #:solenoid-name
    #:rename-component #:assign-unique-label #:refresh-solenoid-tags
    #:component-ports #:component-port-position #:connector-position
    #:component-geometry #:component-world-geometry #:valve-geometry

@@ -446,6 +446,93 @@ sets. Returns (values circuit sensor cylinder coil)."
           (is (eq :open (ofs:component-state prox))
               "and dropped out again once the piston left it"))))))
 
+;;; The self-cycling demo, which is what proximity switches are for.
+
+(defun count-strokes (circuit cylinder steps &key (dt 1/60))
+  "How many times the piston runs out far enough to make the switch at the
+extended end, over STEPS.
+
+The threshold is 0.9 rather than 1.0 on purpose: a proximity switch is made
+while the piston is within `*sensor-band*` of it, so a cycling rod turns round
+a few percent short of the end cap, exactly as a reed switch on a real cylinder
+makes on the approach. Counted on the rising edge, so a rod parked past the
+threshold counts once rather than once per step.
+
+Returns (values strokes min-travel)."
+  (let ((strokes 0) (was-out nil) (lowest 1.0))
+    (dotimes (i steps (values strokes lowest))
+      (ofs:step-simulation circuit :dt dt)
+      (let* ((travel (ofs:component-travel cylinder))
+             (out (>= travel 0.9)))
+        (setf lowest (min lowest travel))
+        (when (and out (not was-out)) (incf strokes))
+        (setf was-out out)))))
+
+(test auto-cycle-demo-wires-up
+  (multiple-value-bind (circuit button valve cylinder) (ofs:make-auto-cycle-demo-circuit)
+    (declare (ignore button))
+    (is (eq :valve-5-2-detented (ofs:component-kind valve)))
+    (is (eq :detent (ofs:component-hold valve))
+        "the detent is load-bearing here, not incidental")
+    (let ((switches (remove-if-not
+                     (lambda (c) (eq :sensor-no (ofs:component-kind c)))
+                     (ofs:circuit-components circuit))))
+      (is (= 2 (length switches)) "one switch at each end of the stroke")
+      ;; Both must name the cylinder that is actually in this circuit.
+      (is (every (lambda (s)
+                   (string= (ofs:component-label cylinder)
+                            (ofs:sensor-target s)))
+                 switches))
+      (is (equal '(0.0 1.0)
+                 (sort (mapcar (lambda (s)
+                                 (nth-value 1 (ofs:sensor-target s)))
+                               switches)
+                       #'<))
+          "mounted at the retracted and extended ends"))))
+
+(test auto-cycle-demo-runs-a-single-stroke-from-a-tap
+  (multiple-value-bind (circuit button valve cylinder) (ofs:make-auto-cycle-demo-circuit)
+    (settle circuit :steps 5)
+    (is (= 0.0 (ofs:component-travel cylinder)) "starts home and idle")
+    ;; Tap, then hands off entirely.
+    (setf (ofs:component-pressed button) t)
+    (settle circuit :steps 5)
+    (setf (ofs:component-pressed button) nil)
+    (is (= 1 (count-strokes circuit cylinder 240)) "one stroke out")
+    ;; With Y1a never re-energised there is nothing to interrupt the return, so
+    ;; unlike a cycling rod this one runs all the way onto the stop.
+    (is (= 0.0 (ofs:component-travel cylinder)) "and all the way home again")
+    ;; And then it must stay there, since nothing is holding S1.
+    (is (= 0 (count-strokes circuit cylinder 240))
+        "with the button released it must not cycle again")
+    (is (eq :right (ofs:component-state valve)))))
+
+(test auto-cycle-demo-reciprocates-while-the-button-is-held
+  ;; The point of the circuit: no relay, no second button, and the rod keeps
+  ;; going because each end of the stroke reports itself to the ladder.
+  (multiple-value-bind (circuit button valve cylinder) (ofs:make-auto-cycle-demo-circuit)
+    (declare (ignore valve))
+    (settle circuit :steps 5)
+    (setf (ofs:component-pressed button) t)
+    ;; A full out-and-back is ~100 steps at the default travel rate, so 400
+    ;; steps must contain several complete cycles.
+    (multiple-value-bind (strokes lowest) (count-strokes circuit cylinder 400)
+      (is (>= strokes 3) "should keep cycling, not stall at either end")
+      (is (< lowest 0.1) "and come back to the switch at the home end each time"))))
+
+(test a-detent-is-required-for-the-auto-cycle
+  ;; Why the demo uses a detented valve. Each switch is made for only a sliver
+  ;; of the stroke, so for most of every stroke neither coil is energised. A
+  ;; spring-return spool would fall back the moment the switch that sent it
+  ;; dropped out, and the rod would stall just off the end.
+  (multiple-value-bind (circuit button valve cylinder) (ofs:make-auto-cycle-demo-circuit)
+    (setf (ofs:component-hold valve) :spring)
+    (settle circuit :steps 5)
+    (setf (ofs:component-pressed button) t)
+    (multiple-value-bind (strokes) (count-strokes circuit cylinder 400)
+      (is (= 0 strokes)
+          "a spring-return spool cannot complete the stroke this circuit asks for"))))
+
 ;;; Saving and loading.
 
 (defun temp-circuit-path (name)

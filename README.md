@@ -88,6 +88,21 @@ one frame and the next.
 Wire one to the retract solenoid of a detented valve and a momentary tap on the
 extend button gives a complete out-and-back cycle with no second press.
 
+`make-auto-cycle-demo-circuit` is the worked version — a switch at *each* end,
+so holding `S1` makes the rod reciprocate continuously and tapping it gives a
+single stroke. No relay, and no second button:
+
+```lisp
+(open-fluidsim.ui:run :circuit (ofs:make-auto-cycle-demo-circuit))
+```
+
+It is also the circuit that shows what the detent is for. A switch is made only
+while the piston is within the band, so for most of every stroke *neither* coil
+is energised and the spool is holding its own position; a spring-return valve
+in the same circuit stalls just off the end and never completes a stroke.
+Watch for the rod turning round a few percent short of each end cap — a
+proximity switch is made as the piston approaches it, not when it arrives.
+
 ## The editor
 
 Two modes, toggled with `space`:
