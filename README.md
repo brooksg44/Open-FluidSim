@@ -74,6 +74,7 @@ Two modes, toggled with `space`:
 | click a port, then another port | wire them together |
 | click that same pair again | unwire them |
 | `T` | retag the selected component |
+| `S` / `L` | save / load a circuit by name |
 | `Del` / `Backspace` | remove the selected component and its wires |
 | `Esc` | cancel a placement or a half-finished wire |
 | right-drag / wheel / `F` | pan, zoom, fit to window |
@@ -85,6 +86,20 @@ electrical simulation.
 
 Cylinders print their extension as a percentage beside them, on the canvas
 rather than in the HUD, since a circuit can hold more than one.
+
+## Saving
+
+`S` and `L` prompt for a name; bare names resolve to `~/circuits/<name>.ofs`,
+and anything with a slash is treated as a path.
+
+A circuit is written as a plain s-expression — component kinds, positions,
+tags and states, plus wires as index quadruples. No schema, no parser, no
+serialisation library; `read` and `print` do the work. Valve positions and
+piston travel are saved too, so a detented valve reloads where you left it
+rather than snapping back to rest. Files are read with `*read-eval*` bound to
+`nil`.
+
+## Colours
 
 Conductors are shaded by what they carry: **red** for supply, **blue** for a
 return to 0V, hollow grey for neither. The blue matters because a coil does

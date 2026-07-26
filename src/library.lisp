@@ -30,12 +30,18 @@ which is the whole point of a memory valve."
     (values circuit valve cylinder)))
 
 (defun make-relay-demo-circuit ()
-  "An electrical rung driving the pneumatic circuit above.
+  "Electrical rungs driving the pneumatic circuit above.
 
-+24V -> push button -> relay coil K1 -> 0V, and a second rung where the K1
-contact feeds the Sol 1 solenoid. Pressing the button closes K1, which closes
-the contact, which energises Sol 1, which shifts the valve and extends the
-cylinder. Returns (values circuit button valve cylinder)."
+Rung 1: +24V -> S1 -> relay coil K1 -> 0V.
+Rung 2: +24V -> K1 contact -> Y1a solenoid -> 0V, so S1 extends the cylinder.
+Rung 3: +24V -> S2 -> Y1b solenoid -> 0V, so S2 retracts it.
+
+Both coils are needed for the detent to be demonstrable: a momentary tap on S1
+latches the valve and the cylinder runs out and *stays* out, and it takes a tap
+on S2 to send it back. With only one coil wired there is no way to reverse it,
+which makes a working detent look like a stuck valve.
+
+Returns (values circuit extend-button valve cylinder retract-button)."
   (multiple-value-bind (circuit valve cylinder) (make-demo-circuit)
     (let ((power   (make-component-of-kind :power-24v    :origin (pt 150.0 60.0)))
           (button  (make-component-of-kind :push-button  :origin (pt 150.0 30.0)))
@@ -44,13 +50,20 @@ cylinder. Returns (values circuit button valve cylinder)."
           (power-2 (make-component-of-kind :power-24v    :origin (pt 230.0 60.0)))
           (contact (make-component-of-kind :contact-no   :origin (pt 230.0 30.0)))
           (sol     (make-component-of-kind :solenoid-out :origin (pt 230.0 0.0)))
-          (ground-2 (make-component-of-kind :common-0v   :origin (pt 230.0 -30.0))))
-      (dolist (c (list power button coil ground power-2 contact sol ground-2))
+          (ground-2 (make-component-of-kind :common-0v   :origin (pt 230.0 -30.0)))
+          (power-3 (make-component-of-kind :power-24v    :origin (pt 310.0 60.0)))
+          (button-2 (make-component-of-kind :push-button :origin (pt 310.0 30.0)))
+          (sol-2   (make-component-of-kind :solenoid-out :origin (pt 310.0 0.0)))
+          (ground-3 (make-component-of-kind :common-0v   :origin (pt 310.0 -30.0))))
+      (dolist (c (list power button coil ground power-2 contact sol ground-2
+                       power-3 button-2 sol-2 ground-3))
         (add-component circuit c))
-      ;; Tie the solenoid symbol to the valve's first coil by tag. This is the
-      ;; whole electric-to-pneumatic link: matching text, nothing more.
-      (setf (component-label sol)
-            (solenoid-name (first (component-solenoids valve))))
+      (setf (component-label button-2) "S2")
+      ;; Tie each solenoid symbol to a valve coil by tag. This is the whole
+      ;; electric-to-pneumatic link: matching text, nothing more.
+      (destructuring-bind (coil-a coil-b) (component-solenoids valve)
+        (setf (component-label sol) (solenoid-name coil-a)
+              (component-label sol-2) (solenoid-name coil-b)))
       ;; Rung 1: button energises K1.
       (connect circuit (component-connector power 0)  (component-connector button 0))
       (connect circuit (component-connector button 1) (component-connector coil 0))
@@ -59,4 +72,8 @@ cylinder. Returns (values circuit button valve cylinder)."
       (connect circuit (component-connector power-2 0)  (component-connector contact 0))
       (connect circuit (component-connector contact 1)  (component-connector sol 0))
       (connect circuit (component-connector sol 1)      (component-connector ground-2 0))
-      (values circuit button valve cylinder))))
+      ;; Rung 3: S2 drives the other coil, so the valve can be sent back.
+      (connect circuit (component-connector power-3 0)   (component-connector button-2 0))
+      (connect circuit (component-connector button-2 1)  (component-connector sol-2 0))
+      (connect circuit (component-connector sol-2 1)     (component-connector ground-3 0))
+      (values circuit button valve cylinder button-2))))

@@ -310,6 +310,103 @@
     (is (eq :open (ofs:component-state contact))
         "an NC contact sharing the coil's label should open")))
 
+;;; Saving and loading.
+
+(defun temp-circuit-path (name)
+  (merge-pathnames (format nil "open-fluidsim-test-~a.ofs" name)
+                   #p"/tmp/"))
+
+(test save-and-load-round-trips
+  (multiple-value-bind (circuit s1 valve cylinder) (ofs:make-relay-demo-circuit)
+    (declare (ignore cylinder))
+    ;; Put the circuit in a non-default state first, so the test would notice
+    ;; if loading silently reset everything to rest.
+    (setf (ofs:component-pressed s1) t)
+    (settle circuit)
+    (setf (ofs:component-pressed s1) nil)
+    (settle circuit)
+    (is (eq :left (ofs:component-state valve)))
+    (let ((path (temp-circuit-path "roundtrip")))
+      (ofs:save-circuit circuit path)
+      (is (probe-file path) "the file should exist")
+      (let ((back (ofs:load-circuit path)))
+        (is (= (length (ofs:circuit-components circuit))
+               (length (ofs:circuit-components back))))
+        (is (= (length (ofs:circuit-wires circuit))
+               (length (ofs:circuit-wires back))))
+        (let ((restored (find :valve-5-2-detented (ofs:circuit-components back)
+                              :key #'ofs:component-kind)))
+          (is (eq :left (ofs:component-state restored))
+              "a detented valve must reload where it was left, not at rest")
+          (is (string= "Y1" (ofs:component-label restored)))
+          (is (equal '("Y1a" "Y1b")
+                     (mapcar #'ofs:solenoid-name (ofs:component-solenoids restored)))
+              "coil tags must survive the round trip, or links break")))
+      (delete-file path))))
+
+(test a-loaded-circuit-still-simulates
+  ;; Wires are stored as indices, so a mistake there would produce a circuit
+  ;; that loads but conducts nothing.
+  (multiple-value-bind (circuit s1 valve cylinder) (ofs:make-relay-demo-circuit)
+    (declare (ignore s1 valve cylinder))
+    (let ((path (temp-circuit-path "simulates")))
+      (ofs:save-circuit circuit path)
+      (let* ((back (ofs:load-circuit path))
+             (valve (find :valve-5-2-detented (ofs:circuit-components back)
+                          :key #'ofs:component-kind))
+             (cyl (find :cylinder-double (ofs:circuit-components back)
+                        :key #'ofs:component-kind))
+             (button (find-if (lambda (c)
+                                (and (eq :push-button (ofs:component-kind c))
+                                     (string= "S1" (ofs:component-label c))))
+                              (ofs:circuit-components back))))
+        (is (not (null button)) "S1 should have survived the round trip")
+        (setf (ofs:component-pressed button) t)
+        (settle back)
+        (is (eq :left (ofs:component-state valve))
+            "the reloaded circuit should still shift its valve")
+        (is (= 1.0 (ofs:component-travel cyl))
+            "and still drive its cylinder"))
+      (delete-file path))))
+
+(test loading-rejects-a-foreign-file
+  (let ((path (temp-circuit-path "foreign")))
+    (with-open-file (out path :direction :output :if-exists :supersede)
+      (write-line "(:something-else 1 :components nil :wires nil)" out))
+    (signals error (ofs:load-circuit path))
+    (delete-file path)))
+
+(test bare-names-resolve-to-the-circuit-directory
+  (let ((path (ofs:circuit-path "demo")))
+    (is (string= "demo" (pathname-name path)))
+    (is (string= "ofs" (pathname-type path))))
+  ;; An explicit path is left alone apart from gaining the type.
+  (is (string= "elsewhere" (pathname-name (ofs:circuit-path "/tmp/elsewhere")))))
+
+;;; The demo circuit must be operable in both directions.
+
+(test demo-circuit-can-extend-and-retract
+  ;; Regression: with only one solenoid symbol wired there was no way to send
+  ;; the detented valve back, which made a working detent look like a stuck
+  ;; valve.
+  (multiple-value-bind (circuit s1 valve cylinder s2) (ofs:make-relay-demo-circuit)
+    (is (not (null s2)) "the demo needs a second button to retract")
+    (settle circuit :steps 5)
+    ;; Momentary tap: the detent should latch and the stroke complete.
+    (setf (ofs:component-pressed s1) t)
+    (settle circuit :steps 6)
+    (setf (ofs:component-pressed s1) nil)
+    (settle circuit)
+    (is (eq :left (ofs:component-state valve)) "detent latches after a tap")
+    (is (= 1.0 (ofs:component-travel cylinder)) "and the stroke completes")
+    ;; The other button must send it back.
+    (setf (ofs:component-pressed s2) t)
+    (settle circuit :steps 6)
+    (setf (ofs:component-pressed s2) nil)
+    (settle circuit)
+    (is (eq :right (ofs:component-state valve)) "S2 latches it the other way")
+    (is (= 0.0 (ofs:component-travel cylinder)) "and it retracts")))
+
 (test hit-testing-finds-components-and-ports
   (let* ((circuit (ofs:make-circuit))
          (valve (ofs:add-component circuit (ofs:make-component-of-kind

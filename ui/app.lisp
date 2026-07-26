@@ -25,8 +25,11 @@ the rings read as part of the drawing rather than sitting on top of it.")
   (dragging nil)
   (drag-dx 0.0)
   (drag-dy 0.0)
-  (renaming nil)                        ; component whose tag is being typed
-  (label-buffer "")
+  ;; A modal text prompt: :rename, :save or :load, with the component being
+  ;; retagged when it is :rename.
+  (prompt nil)
+  (prompt-target nil)
+  (prompt-buffer "")
   (status "Click a palette entry, then click the canvas to place it."))
 
 ;;; ------------------------------------------------------------------
@@ -175,47 +178,94 @@ the view stays centred throughout a live drag-resize, not just once it ends."
   (unless (rl:is-mouse-button-down :mouse-button-left)
     (setf (editor-dragging editor) nil)))
 
-(defun handle-rename-keys (editor)
-  "Type a new tag. Enter commits, Escape abandons."
+(defun prompt-label (purpose)
+  (ecase purpose
+    (:rename "tag")
+    (:save "save as")
+    (:load "load")))
+
+(defun finish-prompt (editor)
+  "Apply whatever the prompt was collecting."
+  (let ((text (editor-prompt-buffer editor)))
+    (case (editor-prompt editor)
+      (:rename
+       (let ((component (editor-prompt-target editor)))
+         (ofs:rename-component component text)
+         (setf (editor-status editor)
+               (format nil "Tagged ~a.~@[ Coils: ~a~]" text
+                       (let ((coils (ofs:component-solenoids component)))
+                         (when coils
+                           (format nil "~{~a~^, ~}"
+                                   (mapcar #'ofs:solenoid-name coils))))))))
+      (:save
+       (if (string= "" text)
+           (setf (editor-status editor) "Save cancelled: no name given.")
+           (handler-case
+               (let ((path (ofs:save-circuit (editor-circuit editor)
+                                             (ofs:circuit-path text))))
+                 (setf (editor-status editor) (format nil "Saved ~a" path)))
+             (error (e)
+               (setf (editor-status editor) (format nil "Save failed: ~a" e))))))
+      (:load
+       (if (string= "" text)
+           (setf (editor-status editor) "Load cancelled: no name given.")
+           (handler-case
+               (let ((circuit (ofs:load-circuit (ofs:circuit-path text))))
+                 ;; Replace wholesale, and drop every reference into the old
+                 ;; circuit -- a stale selection would draw a component that
+                 ;; is no longer in the drawing.
+                 (setf (editor-circuit editor) circuit
+                       (editor-selected editor) nil
+                       (editor-dragging editor) nil
+                       (editor-pending editor) nil
+                       (editor-placing editor) nil
+                       (editor-status editor)
+                       (format nil "Loaded ~a components."
+                               (length (ofs:circuit-components circuit)))))
+             (error (e)
+               (setf (editor-status editor)
+                     (format nil "Load failed: ~a" e)))))))
+    (setf (editor-prompt editor) nil
+          (editor-prompt-target editor) nil)))
+
+(defun handle-prompt-keys (editor)
+  "Collect typed text. Enter accepts, Escape abandons."
   (loop for code = (rl:get-char-pressed)
         until (zerop code)
         do (when (and (>= code 32) (< code 127))
-             (setf (editor-label-buffer editor)
-                   (concatenate 'string (editor-label-buffer editor)
+             (setf (editor-prompt-buffer editor)
+                   (concatenate 'string (editor-prompt-buffer editor)
                                 (string (code-char code))))))
   (when (and (rl:is-key-pressed :key-backspace)
-             (plusp (length (editor-label-buffer editor))))
-    (setf (editor-label-buffer editor)
-          (subseq (editor-label-buffer editor)
-                  0 (1- (length (editor-label-buffer editor))))))
+             (plusp (length (editor-prompt-buffer editor))))
+    (setf (editor-prompt-buffer editor)
+          (subseq (editor-prompt-buffer editor)
+                  0 (1- (length (editor-prompt-buffer editor))))))
   (cond ((rl:is-key-pressed :key-escape)
-         (setf (editor-renaming editor) nil
-               (editor-status editor) "Retag cancelled."))
+         (setf (editor-prompt editor) nil
+               (editor-prompt-target editor) nil
+               (editor-status editor) "Cancelled."))
         ((or (rl:is-key-pressed :key-enter) (rl:is-key-pressed :key-kp-enter))
-         (let ((component (editor-renaming editor)))
-           (ofs:rename-component component (editor-label-buffer editor))
-           (setf (editor-renaming editor) nil
-                 (editor-status editor)
-                 (format nil "Tagged ~a.~@[ Coils: ~a~]"
-                         (editor-label-buffer editor)
-                         (let ((coils (ofs:component-solenoids component)))
-                           (when coils
-                             (format nil "~{~a~^, ~}"
-                                     (mapcar #'ofs:solenoid-name coils)))))))))) 
+         (finish-prompt editor))))
 
-(defun begin-rename (editor)
-  (let ((component (editor-selected editor)))
-    (when component
-      (setf (editor-renaming editor) component
-            (editor-label-buffer editor) (ofs:component-label component)
-            (editor-status editor) "Type a tag, Enter to accept."))))
+(defun begin-prompt (editor purpose &key target (initial ""))
+  (setf (editor-prompt editor) purpose
+        (editor-prompt-target editor) target
+        (editor-prompt-buffer editor) initial
+        (editor-status editor)
+        (format nil "Type a ~a, Enter to accept." (prompt-label purpose))))
 
 (defun handle-keys (editor camera)
-  (when (editor-renaming editor)
-    (return-from handle-keys (handle-rename-keys editor)))
+  (when (editor-prompt editor)
+    (return-from handle-keys (handle-prompt-keys editor)))
   (let ((circuit (editor-circuit editor)))
     (when (rl:is-key-pressed :key-t)
-      (begin-rename editor))
+      (let ((component (editor-selected editor)))
+        (when component
+          (begin-prompt editor :rename :target component
+                               :initial (ofs:component-label component)))))
+    (when (rl:is-key-pressed :key-s) (begin-prompt editor :save))
+    (when (rl:is-key-pressed :key-l) (begin-prompt editor :load))
     (when (rl:is-key-pressed :key-escape)
       (setf (editor-placing editor) nil
             (editor-pending editor) nil
@@ -334,14 +384,15 @@ cylinders and a single HUD figure could not say which one it meant."
     (rl:draw-rectangle 0 0 (rl:get-screen-width) *hud-height* :raywhite)
     (rl:draw-text (if running "RUN" "EDIT") 12 10 20 (if running :maroon :darkgray))
     ;; Clear of the mode label, which is 20px type and wider than it looks.
-    (rl:draw-text "space run/stop   T retag   F fit   Esc cancel   Del remove   right-drag pan   wheel zoom"
+    (rl:draw-text "space run/stop   S save   L load   T retag   F fit   Del remove   right-drag pan   wheel zoom"
                   84 14 12 :gray)
     (rl:draw-text "click a port then another to wire them; click a wired pair again to unwire"
                   12 34 12 :gray)
-    (rl:draw-text (if (editor-renaming editor)
-                      (format nil "tag: ~a_" (editor-label-buffer editor))
+    (rl:draw-text (if (editor-prompt editor)
+                      (format nil "~a: ~a_" (prompt-label (editor-prompt editor))
+                              (editor-prompt-buffer editor))
                       (editor-status editor))
-                  12 52 12 (if (editor-renaming editor) :maroon :darkgray))
+                  12 52 12 (if (editor-prompt editor) :maroon :darkgray))
     (rl:draw-line-ex (v:vec2 0.0 (float *hud-height* 1.0))
                      (v:vec2 (float (rl:get-screen-width) 1.0) (float *hud-height* 1.0))
                      1.0 :gray)))

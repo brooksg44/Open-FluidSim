@@ -19,7 +19,8 @@
                              (:file "sources")
                              (:file "electric")
                              (:file "library")
-                             (:file "editing")))))
+                             (:file "editing")
+                             (:file "persist")))))
 
 ;; The renderer is a separate system so the core stays loadable, testable and
 ;; portable without dragging in a foreign library.

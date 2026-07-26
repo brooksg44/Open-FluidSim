@@ -38,6 +38,9 @@
    #:make-component-of-kind #:component-bounds #:point-in-component-p
    #:component-at #:connector-at #:move-component #:wire-between #:toggle-wire
    #:remove-component #:clear-circuit
+   ;; persistence
+   #:save-circuit #:load-circuit #:circuit-path #:circuit-directory
+   #:circuit-form #:circuit-from-form
    ;; library
    #:make-valve-5-2-double-solenoid #:make-supply #:make-exhaust #:make-cylinder
    #:make-demo-circuit #:make-relay-demo-circuit #:solenoid-name
