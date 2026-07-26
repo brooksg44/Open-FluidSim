@@ -18,9 +18,8 @@ whole component exists for, and it is what a spring-return valve would not do.
 Live pressure is drawn in red: pressurised wires and filled connection points,
 against grey and hollow rings for the rest.
 
-What does not exist yet: save/load, undo, orthogonal wire routing (wires are
-drawn straight between ports), sensors, and any way to edit a component's
-label from the UI — so relay links use their defaults (`K1`, `Sol 1`).
+What does not exist yet: undo, orthogonal wire routing (wires are drawn
+straight between ports), and sensors.
 
 ## Components
 
