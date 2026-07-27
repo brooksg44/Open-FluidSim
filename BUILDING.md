@@ -1,7 +1,9 @@
 # Building standalone executables
 
-To run from source, use `./run.sh` — you don't need any of this. This document
-is about producing a single binary someone else can double-click.
+To run from source, use `./run.sh` — or `.\run.ps1` on Windows, which fetches
+the pieces a package manager would have supplied. You don't need any of this
+document for that. This one is about producing a single binary someone else can
+double-click.
 
 ## How it works, and the one hard constraint
 
@@ -97,6 +99,9 @@ must right-click → Open, or run `xattr -dr com.apple.quarantine` themselves.
 
 ## Windows
 
+*Verified: the workflow below produces an `open-fluidsim.exe` that launches.
+Artifact is ~15.7 MB zipped, built in under two minutes.*
+
 Because the image must be dumped on Windows, there are two realistic routes.
 
 ### Route A: GitHub Actions (recommended)
@@ -134,6 +139,13 @@ Still worth watching:
   `cffi:*foreign-library-directories*` in `build.lisp` before quickloading.
 - **Threading.** SBCL on Windows supports threads but is less exercised than on
   Unix. The core doesn't spawn any; this only matters if that changes.
+
+One bug found this way is worth knowing about before you chase it again: the
+first Windows build behaved as though the right mouse button were held down
+forever. It was not a UI bug but a foreign-call one, and
+[`ui/raylib-bool.lisp`](ui/raylib-bool.lisp) explains it and holds the fix.
+`.\run.ps1 -Check` is the diagnostic — it drives the editor loop for a second
+without touching the mouse and prints what the predicates claim.
 
 ### Route B: build inside Parallels
 

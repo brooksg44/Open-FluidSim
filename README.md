@@ -273,9 +273,13 @@ From a REPL instead:
 sbcl --noinform --disable-debugger --non-interactive --load build.lisp
 ```
 
-Gives a 13 MB native binary. See [BUILDING.md](BUILDING.md) for .app bundles,
-code signing, and the Windows story — which is constrained by SBCL being
-unable to cross-compile an image.
+Gives a 13 MB native binary. On Windows, `.github/workflows/build.yml` does the
+same on a CI runner — SBCL cannot cross-compile an image, so the `.exe` has to
+be dumped on Windows. It ships with `raylib.dll` and `libffi-8.dll` beside it,
+since CFFI opens both at startup rather than linking them in.
+
+See [BUILDING.md](BUILDING.md) for .app bundles, code signing, and what the
+Windows build needs that a Unix one does not.
 
 ## Notes on portability
 
@@ -283,6 +287,16 @@ unable to cross-compile an image.
 pass structs correctly against it — verified by round-tripping a point through
 a `Camera2D`. On macOS raylib runs on OpenGL 4.1 via Metal; Apple deprecated
 OpenGL in 2018 but still ships it. If that ever ends, the renderer is one file.
+
+Those bindings do get one thing wrong, and it only shows on Windows. raylib
+returns C `bool`, which is one byte; `cl-raylib` declares those functions to
+CFFI as `:boolean`, which reads four. The x64 ABI leaves the upper three
+undefined and raylib's MSVC build fills them with garbage — measured with no
+button held, `IsMouseButtonDown` returned `0x00F0C000`, so CFFI reported true
+and the editor looked permanently stuck in a pan gesture.
+[`ui/raylib-bool.lisp`](ui/raylib-bool.lisp) binds the predicates the editor
+uses against a one-byte boolean instead. The clang build used on macOS
+zero-extends, which is the only reason this went unnoticed there.
 
 SBCL cannot cross-compile an image, so a Windows binary has to be produced on
 Windows — a CI runner is the intended route rather than a local machine.

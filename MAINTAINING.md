@@ -20,6 +20,10 @@ read in an afternoon, and this guide is arranged so you can.
 ./run.sh --test   # run the test suite; exits non-zero on failure
 ```
 
+On Windows use `run.ps1`, which takes the same modes as switches — run
+`.\run.ps1 -Setup` first, since nothing on that platform supplies raylib or
+cl-raylib for you.
+
 You need SBCL, Quicklisp, and the native raylib library (`brew install sbcl
 raylib` on macOS). The test suite needs neither raylib nor a display — the
 core has no renderer in it, which is deliberate and is the single most useful
