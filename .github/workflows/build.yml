@@ -1,0 +1,39 @@
+name: build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SBCL
+        run: choco install sbcl --no-progress -y
+
+      - name: Install Quicklisp
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://beta.quicklisp.org/quicklisp.lisp -OutFile quicklisp.lisp
+          sbcl --non-interactive --load quicklisp.lisp `
+               --eval '(quicklisp-quickstart:install)'
+
+      - name: Fetch raylib DLL
+        shell: pwsh
+        run: |
+          $v = "5.5"
+          Invoke-WebRequest "https://github.com/raysan5/raylib/releases/download/$v/raylib-$v`_win64_msvc16.zip" -OutFile raylib.zip
+          Expand-Archive raylib.zip -DestinationPath raylib
+          Copy-Item (Get-ChildItem -Recurse -Filter raylib.dll raylib).FullName .
+
+      - name: Build
+        run: sbcl --noinform --disable-debugger --non-interactive --load build.lisp
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: open-fluidsim-windows
+          path: |
+            open-fluidsim.exe
+            raylib.dll
