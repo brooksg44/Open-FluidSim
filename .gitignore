@@ -14,6 +14,11 @@
 /open-fluidsim.exe
 /*.app/
 
+# ocicl's downloaded systems and its manifest of them: a local choice of
+# package manager, and reproducible from the .asd either way.
+/ocicl/
+/ocicl.csv
+
 # Fetched by run.ps1 -Setup, and downloaded CI artifacts
 /raylib.dll
 /libffi-8.dll
