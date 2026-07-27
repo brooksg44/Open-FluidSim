@@ -20,6 +20,11 @@ jobs:
           sbcl --non-interactive --load quicklisp.lisp `
                --eval '(quicklisp-quickstart:install)'
 
+      - name: Clone cl-raylib
+        shell: pwsh
+        run: |
+          git clone https://github.com/longlene/cl-raylib "$env:USERPROFILE\quicklisp\local-projects\cl-raylib"
+
       - name: Fetch raylib DLL
         shell: pwsh
         run: |
