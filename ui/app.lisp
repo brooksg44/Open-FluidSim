@@ -192,6 +192,21 @@ the view stays centred throughout a live drag-resize, not just once it ends."
     (:save "save as")
     (:load "load")))
 
+(defparameter *listed-circuits* 6
+  "How many circuit names to spell out before summarising the rest. The status
+line is one line wide, and the examples have long names.")
+
+(defun circuit-list-phrase ()
+  "The loadable circuits, as a phrase for the status line, or NIL if there are
+none. Names from the user's own directory come first."
+  (let ((names (ofs:list-circuits)))
+    (when names
+      (if (<= (length names) *listed-circuits*)
+          (format nil "Available: ~{~a~^, ~}" names)
+          (format nil "Available: ~{~a~^, ~} and ~a more"
+                  (subseq names 0 *listed-circuits*)
+                  (- (length names) *listed-circuits*))))))
+
 (defun finish-prompt (editor)
   "Apply whatever the prompt was collecting."
   (let ((text (editor-prompt-buffer editor)))
@@ -218,7 +233,10 @@ the view stays centred throughout a live drag-resize, not just once it ends."
        (if (string= "" text)
            (setf (editor-status editor) "Load cancelled: no name given.")
            (handler-case
-               (let ((circuit (ofs:load-circuit (ofs:circuit-path text))))
+               (let* ((path (or (ofs:find-circuit-file text)
+                                (error "no circuit called ~a.~@[ ~a~]"
+                                       text (circuit-list-phrase))))
+                      (circuit (ofs:load-circuit path)))
                  ;; Replace wholesale, and drop every reference into the old
                  ;; circuit -- a stale selection would draw a component that
                  ;; is no longer in the drawing.
@@ -228,7 +246,8 @@ the view stays centred throughout a live drag-resize, not just once it ends."
                        (editor-pending editor) nil
                        (editor-placing editor) nil
                        (editor-status editor)
-                       (format nil "Loaded ~a components."
+                       (format nil "Loaded ~a: ~a components."
+                               (pathname-name path)
                                (length (ofs:circuit-components circuit)))))
              (error (e)
                (setf (editor-status editor)
@@ -284,8 +303,14 @@ the view stays centred throughout a live drag-resize, not just once it ends."
           (begin-prompt editor :rename :target component
                                :initial (ofs:component-label component)
                                :hint (retag-hint component)))))
-    (when (key-pressed-p :key-s) (begin-prompt editor :save))
-    (when (key-pressed-p :key-l) (begin-prompt editor :load))
+    ;; Both prompts say where the files are: a bare name is resolved against a
+    ;; search path the user cannot see, so naming the directory is the only way
+    ;; they learn where their work went.
+    (when (key-pressed-p :key-s)
+      (begin-prompt editor :save
+                    :hint (format nil "Saves to ~a" (ofs:circuit-directory))))
+    (when (key-pressed-p :key-l)
+      (begin-prompt editor :load :hint (circuit-list-phrase)))
     (when (key-pressed-p :key-escape)
       (setf (editor-placing editor) nil
             (editor-pending editor) nil

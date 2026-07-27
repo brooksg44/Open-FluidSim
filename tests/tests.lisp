@@ -602,9 +602,54 @@ Returns (values strokes min-travel)."
 (test bare-names-resolve-to-the-circuit-directory
   (let ((path (ofs:circuit-path "demo")))
     (is (string= "demo" (pathname-name path)))
-    (is (string= "ofs" (pathname-type path))))
+    (is (string= "ofs" (pathname-type path)))
+    (is (equal (pathname-directory (ofs:circuit-directory))
+               (pathname-directory path))
+        "a save with no directory in it belongs in the user's own directory"))
   ;; An explicit path is left alone apart from gaining the type.
-  (is (string= "elsewhere" (pathname-name (ofs:circuit-path "/tmp/elsewhere")))))
+  (is (string= "elsewhere" (pathname-name (ofs:circuit-path "/tmp/elsewhere"))))
+  ;; Typing the extension is not a mistake worth punishing: it still names a
+  ;; circuit rather than a file in the current directory.
+  (is (equal (pathname-directory (ofs:circuit-path "demo"))
+             (pathname-directory (ofs:circuit-path "demo.ofs")))))
+
+(test the-circuit-directory-is-a-directory
+  ;; OPEN_FLUIDSIM_CIRCUITS is written by hand, so it arrives with or without a
+  ;; trailing separator; both have to mean the same directory or a save silently
+  ;; becomes a file named after it.
+  (is (null (pathname-name (ofs:circuit-directory))))
+  (is (equal (pathname-directory (ofs::%as-directory "/tmp/ofs-circuits/"))
+             (pathname-directory (ofs::%as-directory "/tmp/ofs-circuits"))))
+  (is (null (pathname-name (ofs::%as-directory "/tmp/ofs-circuits")))))
+
+(test the-bundled-examples-are-on-the-search-path
+  ;; The examples in circuits/ are the ones a new user meets first. If the
+  ;; search path stops finding them, the L prompt silently offers nothing.
+  (let ((names (ofs:list-circuits)))
+    (is (member "Auto Cycle" names :test #'string=)
+        "circuits/ should be reachable from a source checkout")
+    (dolist (name '("Auto Cycle" "Double Detent" "Double Spring"))
+      (let ((path (ofs:find-circuit-file name)))
+        (is (not (null path)) "~a should resolve" name)
+        (when path
+          (let ((circuit (ofs:load-circuit path)))
+            (is (plusp (length (ofs:circuit-components circuit)))
+                "~a should load into something" name)))))))
+
+(test example-names-resolve-whatever-the-case
+  ;; Case-insensitive on purpose: the names have capitals and spaces, and a
+  ;; case-sensitive filesystem would otherwise reject what Windows accepts.
+  ;; Compared case-insensitively in turn, because Windows hands back the case
+  ;; that was asked for rather than the case on disk.
+  (flet ((resolve (name) (namestring (ofs:find-circuit-file name))))
+    (is (string-equal (resolve "Auto Cycle") (resolve "auto cycle")))
+    (is (string-equal (resolve "Auto Cycle") (resolve "AUTO CYCLE")))
+    (is (string-equal (resolve "Auto Cycle") (resolve "Auto Cycle.ofs")))))
+
+(test a-missing-circuit-resolves-to-nil-rather-than-erroring
+  ;; The editor turns NIL into a status line listing what does exist; an error
+  ;; here would surface as a backtrace-flavoured message instead.
+  (is (null (ofs:find-circuit-file "no-such-circuit-anywhere"))))
 
 ;;; The demo circuit must be operable in both directions.
 

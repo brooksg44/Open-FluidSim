@@ -616,6 +616,23 @@ that this is a *widening* change of exactly the kind that does not need a
 version bump: new files carry the field, old files still load, and the meaning
 of every field that was already there is unchanged.
 
+### Change where circuits live
+
+Also `src/persist.lisp`, in the block above `circuit-path`. Two ideas there,
+and keeping them apart is what makes the examples work: `circuit-directory` is
+the single writable place a bare name is *saved*, while `circuit-search-path`
+is the ordered list of places a bare name is *looked for*. Saving an example
+therefore writes a copy into the user's own directory instead of editing what
+shipped with the program.
+
+The search path ends with `source-circuit-directory`, which asks ASDF where
+this system's sources are rather than deriving it from
+`*compile-file-truename*` — that points into the fasl cache, not at the
+checkout, which is a tempting half-hour to lose. In a dumped image it comes
+back `NIL` or names a build directory that no longer exists, so
+`executable-circuit-directory` covers the shipped case by looking beside the
+running binary. Both are tried, neither is required.
+
 Wires are stored as `(component-index port-index component-index port-index)`
 because connectors are objects with no identity outside the running image.
 Components are written in placement order (`reverse` of the internal list) so

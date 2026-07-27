@@ -127,6 +127,11 @@ Three things about it are not obvious:
   `libffi-8.dll` travels next to the `.exe` alongside `raylib.dll`. If a
   recipient's machine reports a missing dependency, also copy
   `libgcc_s_seh-1.dll` and `libwinpthread-1.dll` from the same `mingw64\bin`.
+- **`circuits/` ships too, and its position matters.** The examples are found
+  in a `circuits/` directory beside the executable, so the artifact keeps that
+  layout: unzip it whole rather than lifting the `.exe` out on its own. The
+  source tree's copy is found through ASDF, which a dumped image no longer has
+  a valid path for.
 - **raylib version.** Homebrew gave us 6.0 on macOS; the workflow pins a 5.x
   release because that is what raylib publishes prebuilt MSVC binaries for. The
   bindings work against both, but keep the DLL version deliberate rather than

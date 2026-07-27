@@ -17,6 +17,11 @@ locates them and fails with an explanation rather than a backtrace:
 
 Run with -Setup once to fetch the first two.
 
+Saving and loading needs no setup at all. S writes to
+%USERPROFILE%\Documents\Open-FluidSim, or wherever $env:OPEN_FLUIDSIM_CIRCUITS
+points; L searches that first and this checkout's circuits\ after, so the
+bundled examples are loadable by name without being copied anywhere.
+
 .PARAMETER Test
 Run the FiveAM suite and exit non-zero on failure. Needs none of the above:
 the core system is deliberately free of foreign dependencies.

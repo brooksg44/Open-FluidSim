@@ -24,6 +24,14 @@ usage: run.sh [--test] [--help]
 environment:
   QUICKLISP_SETUP  path to quicklisp's setup.lisp
                    (default: \$HOME/quicklisp/setup.lisp)
+
+  OPEN_FLUIDSIM_CIRCUITS
+                   where S saves and L looks first
+                   (default: ~/Documents/Open-FluidSim on macOS,
+                   ~/.local/share/open-fluidsim elsewhere)
+
+The examples in circuits/ are always loadable by name whichever of those is
+set: the L prompt searches your own directory first and this checkout after.
 EOF
 }
 

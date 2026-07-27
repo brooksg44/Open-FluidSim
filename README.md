@@ -136,8 +136,25 @@ more than one and a single HUD figure could not say which it meant.
 
 ## Saving
 
-`S` and `L` prompt for a name; bare names resolve to `~/circuits/<name>.ofs`,
-and anything with a slash is treated as a path.
+`S` and `L` prompt for a name; anything with a slash in it is treated as a
+path, and a bare name is resolved for you.
+
+`S` always writes to your own directory:
+
+| | |
+|---|---|
+| Windows | `%USERPROFILE%\Documents\Open-FluidSim\` |
+| macOS | `~/Documents/Open-FluidSim/` |
+| elsewhere | `~/.local/share/open-fluidsim/` |
+| any of them | overridden by `OPEN_FLUIDSIM_CIRCUITS` |
+
+`L` searches that directory first, then `~/circuits/` (where saves landed
+before this existed), then a `circuits/` folder beside the executable, then the
+`circuits/` in a source checkout. So the worked examples that ship in
+[circuits/](circuits/) load by name — `Auto Cycle`, `Double Detent`, `Double
+Spring` — and saving one puts your edited copy in your own directory rather
+than over the original. The prompt lists what it can find, and matching ignores
+case, so `auto cycle` is enough.
 
 A circuit is written as a plain s-expression — component kinds, positions,
 tags and states, plus wires as index quadruples. No schema, no parser, no

@@ -75,3 +75,7 @@ jobs:
             open-fluidsim.exe
             raylib.dll
             libffi-8.dll
+            # The example circuits, which the exe looks for in a circuits/
+            # directory beside itself. Keep the folder next to the .exe when
+            # unzipping or the L prompt will offer nothing to load.
+            circuits/
