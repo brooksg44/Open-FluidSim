@@ -3,6 +3,28 @@
 A fluid power (pneumatic / hydraulic) circuit simulator in Common Lisp, rebuilt
 from the Unity original. Targets macOS and Windows.
 
+## Download
+
+**[Latest release](https://github.com/brooksg44/Open-FluidSim/releases/latest)**
+— Windows (x86-64) and macOS (Apple Silicon) builds, with the example circuits.
+
+Unzip the whole folder and keep it together: the program looks for its
+libraries and the `circuits/` examples beside itself, so lifting the executable
+out on its own loses them.
+
+Neither build is signed, which each platform will tell you about on first
+launch:
+
+| | |
+|---|---|
+| Windows | SmartScreen warns — *More info* → *Run anyway* |
+| macOS | right-click → *Open*, or `xattr -dr com.apple.quarantine open-fluidsim` |
+
+macOS additionally needs raylib, which the binary loads at startup:
+`brew install raylib`. On Windows the DLLs are in the zip.
+
+To run from source instead, see [Running](#running).
+
 ## Status
 
 Early, but end to end. `run.sh` opens a worked circuit — air supply, 5/2
@@ -290,10 +312,15 @@ From a REPL instead:
 sbcl --noinform --disable-debugger --non-interactive --load build.lisp
 ```
 
-Gives a 13 MB native binary. On Windows, `.github/workflows/build.yml` does the
-same on a CI runner — SBCL cannot cross-compile an image, so the `.exe` has to
-be dumped on Windows. It ships with `raylib.dll` and `libffi-8.dll` beside it,
-since CFFI opens both at startup rather than linking them in.
+Gives a 13 MB native binary. `.github/workflows/build.yml` does the same on CI
+for both platforms — SBCL cannot cross-compile an image, so the `.exe` has to be
+dumped on Windows and the Mach-O on macOS. The Windows build ships with
+`raylib.dll` and `libffi-8.dll` beside it, since CFFI opens both at startup
+rather than linking them in.
+
+Pushing a `v*` tag builds both and publishes them as a
+[release](https://github.com/brooksg44/Open-FluidSim/releases); pushes to `main`
+build without publishing anything.
 
 See [BUILDING.md](BUILDING.md) for .app bundles, code signing, and what the
 Windows build needs that a Unix one does not.

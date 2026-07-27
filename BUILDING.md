@@ -111,6 +111,11 @@ can unzip and run in Parallels exactly the way you ran the itch.io build. The
 workflow lives in [`.github/workflows/build.yml`](.github/workflows/build.yml)
 — read it there rather than trusting a copy pasted into this document.
 
+It builds macOS in the same run, and a `v*` tag turns both into a public
+[release](https://github.com/brooksg44/Open-FluidSim/releases). Send users
+there and never to the Actions tab: workflow artifacts need a signed-in GitHub
+account to download and are deleted after 90 days.
+
 Three things about it are not obvious:
 
 - **libffi is a build-time dependency, not just a runtime one.** `cl-raylib`
