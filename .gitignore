@@ -13,3 +13,9 @@
 /open-fluidsim
 /open-fluidsim.exe
 /*.app/
+
+# Fetched by run.ps1 -Setup, and downloaded CI artifacts
+/raylib.dll
+/libffi-8.dll
+/open-fluidsim-windows/
+/open-fluidsim-windows.zip

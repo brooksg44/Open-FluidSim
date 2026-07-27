@@ -223,6 +223,19 @@ Requires SBCL, Quicklisp, and raylib (`brew install raylib` on macOS).
 ./run.sh --test   # run the test suite
 ```
 
+On Windows, `run.ps1` does the same from PowerShell. Windows has no package
+manager step that supplies raylib and cl-raylib, so run the setup once:
+
+```powershell
+.\run.ps1 -Setup   # fetch raylib.dll and clone cl-raylib
+.\run.ps1          # open the simulator
+.\run.ps1 -Test    # run the test suite
+.\run.ps1 -Repl    # load the system, stay at the SBCL prompt
+```
+
+`-Setup` also reports whether MSYS2 is present with libffi, which the raylib
+bindings need in order to build at all.
+
 `space` toggles between EDIT and RUN. In RUN, click the `S1` pushbutton to
 extend the cylinder and `S2` to retract it; right-drag pans, the wheel zooms,
 and `F` fits the circuit to the window. Tap a button rather than holding it and
