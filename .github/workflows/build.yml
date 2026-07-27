@@ -10,6 +10,35 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # cl-raylib pulls in cffi-libffi (raylib passes structs by value), whose
+      # grovel step shells out to pkg-config and #includes <ffi.h>. Neither is
+      # present on a stock runner, so supply a MinGW toolchain that has both.
+      - name: Install MinGW toolchain with libffi
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-libffi
+
+      - name: Put MinGW and the workspace on PATH
+        shell: pwsh
+        run: |
+          # Prepended so grovel picks this gcc/pkg-config; the workspace entry
+          # makes raylib.dll and libffi-8.dll loadable during the build.
+          Add-Content $env:GITHUB_PATH "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin"
+          Add-Content $env:GITHUB_PATH "$env:GITHUB_WORKSPACE"
+
+      - name: Verify pkg-config finds libffi
+        shell: pwsh
+        run: |
+          pkg-config --cflags libffi
+          if ($LASTEXITCODE -ne 0) { throw "pkg-config cannot resolve libffi; cffi-libffi grovel would fail" }
+
       - name: Install SBCL
         run: choco install sbcl --no-progress -y
 
@@ -25,13 +54,16 @@ jobs:
         run: |
           git clone https://github.com/longlene/cl-raylib "$env:USERPROFILE\quicklisp\local-projects\cl-raylib"
 
-      - name: Fetch raylib DLL
+      - name: Fetch runtime DLLs
         shell: pwsh
         run: |
           $v = "5.5"
           Invoke-WebRequest "https://github.com/raysan5/raylib/releases/download/$v/raylib-$v`_win64_msvc16.zip" -OutFile raylib.zip
           Expand-Archive raylib.zip -DestinationPath raylib
           Copy-Item (Get-ChildItem -Recurse -Filter raylib.dll raylib).FullName .
+          # cffi-libffi dlopens libffi-8.dll at startup, including from the
+          # dumped image, so it has to ship next to the .exe.
+          Copy-Item "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin\libffi-8.dll" .
 
       - name: Build
         run: sbcl --noinform --disable-debugger --non-interactive --load build.lisp
@@ -42,3 +74,4 @@ jobs:
           path: |
             open-fluidsim.exe
             raylib.dll
+            libffi-8.dll

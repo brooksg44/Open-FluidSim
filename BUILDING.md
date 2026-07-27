@@ -97,68 +97,40 @@ must right-click → Open, or run `xattr -dr com.apple.quarantine` themselves.
 
 ## Windows
 
-**Not yet attempted.** Written from the constraints, not from a successful run
-— treat it as a starting point.
-
 Because the image must be dumped on Windows, there are two realistic routes.
 
 ### Route A: GitHub Actions (recommended)
 
 No local Windows machine required, and it produces a downloadable artifact you
-can unzip and run in Parallels exactly the way you ran the itch.io build.
+can unzip and run in Parallels exactly the way you ran the itch.io build. The
+workflow lives in [`.github/workflows/build.yml`](.github/workflows/build.yml)
+— read it there rather than trusting a copy pasted into this document.
 
-`.github/workflows/build.yml`:
+Three things about it are not obvious:
 
-```yaml
-name: build
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+- **libffi is a build-time dependency, not just a runtime one.** `cl-raylib`
+  depends on `cffi-libffi`, because the raylib API passes structs (`Vector2`,
+  `Color`, …) by value and plain CFFI cannot do that. Loading `cffi-libffi`
+  runs a *grovel* step that shells out to `pkg-config` and compiles a C stub
+  which `#include`s `<ffi.h>`. A stock `windows-latest` runner has neither, and
+  the build dies with `fatal error: ffi.h: No such file or directory`. The
+  workflow installs `mingw-w64-x86_64-{gcc,pkgconf,libffi}` via MSYS2 and
+  prepends `mingw64\bin` to `PATH` so grovel's bare `gcc` and `pkg-config`
+  resolve to that toolchain.
+- **Two DLLs have to ship, not one.** `cffi-libffi` `dlopen`s `libffi-8.dll` at
+  startup, and a dumped image reopens its shared objects on launch, so
+  `libffi-8.dll` travels next to the `.exe` alongside `raylib.dll`. If a
+  recipient's machine reports a missing dependency, also copy
+  `libgcc_s_seh-1.dll` and `libwinpthread-1.dll` from the same `mingw64\bin`.
+- **raylib version.** Homebrew gave us 6.0 on macOS; the workflow pins a 5.x
+  release because that is what raylib publishes prebuilt MSVC binaries for. The
+  bindings work against both, but keep the DLL version deliberate rather than
+  accidental.
 
-jobs:
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
+Still worth watching:
 
-      - name: Install SBCL
-        run: choco install sbcl --no-progress -y
-
-      - name: Install Quicklisp
-        shell: pwsh
-        run: |
-          Invoke-WebRequest https://beta.quicklisp.org/quicklisp.lisp -OutFile quicklisp.lisp
-          sbcl --non-interactive --load quicklisp.lisp `
-               --eval '(quicklisp-quickstart:install)'
-
-      - name: Fetch raylib DLL
-        shell: pwsh
-        run: |
-          $v = "5.5"
-          Invoke-WebRequest "https://github.com/raysan5/raylib/releases/download/$v/raylib-$v`_win64_msvc16.zip" -OutFile raylib.zip
-          Expand-Archive raylib.zip -DestinationPath raylib
-          Copy-Item (Get-ChildItem -Recurse -Filter raylib.dll raylib).FullName .
-
-      - name: Build
-        run: sbcl --noinform --disable-debugger --non-interactive --load build.lisp
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: open-fluidsim-windows
-          path: |
-            open-fluidsim.exe
-            raylib.dll
-```
-
-Points to check on the first run:
-
-- **raylib version.** Homebrew gave us 6.0 on macOS; the workflow above pins a
-  5.x release because that is what raylib publishes prebuilt MSVC binaries for.
-  The bindings work against both, but keep the DLL version deliberate rather
-  than accidental.
-- **CFFI finding the DLL.** Windows searches the executable's directory, so
-  `raylib.dll` sitting next to `open-fluidsim.exe` should suffice. If not, set
+- **CFFI finding the DLLs.** Windows searches the executable's directory, so
+  both DLLs sitting next to `open-fluidsim.exe` should suffice. If not, set
   `cffi:*foreign-library-directories*` in `build.lisp` before quickloading.
 - **Threading.** SBCL on Windows supports threads but is less exercised than on
   Unix. The core doesn't spawn any; this only matters if that changes.
@@ -174,7 +146,8 @@ runs the itch.io build. Workable, and slow. Route A is less friction.
 Neither platform's binary is self-contained, because CFFI loads the native
 library at startup. Options, cheapest first:
 
-1. **Ship the library alongside.** `raylib.dll` next to the `.exe`; on macOS
+1. **Ship the library alongside.** `raylib.dll` (plus `libffi-8.dll`, see
+   [Windows](#windows)) next to the `.exe`; on macOS
    `libraylib.dylib` in `Contents/Frameworks/` with an `@executable_path`
    install name set via `install_name_tool`.
 2. **Use `deploy`.** Shinmera's library exists precisely for this: it copies
