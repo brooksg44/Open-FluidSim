@@ -70,7 +70,7 @@ the view stays centred throughout a live drag-resize, not just once it ends."
     (ofs:pt (v:vx p) (- (v:vy p)))))
 
 (defun handle-pan-and-zoom (editor camera)
-  (when (rl:is-mouse-button-down :mouse-button-right)
+  (when (mouse-button-down-p :mouse-button-right)
     (let ((delta (rl:get-mouse-delta))
           (zoom (rl:camera2d-zoom camera))
           (target (rl:camera2d-target camera)))
@@ -148,7 +148,7 @@ the view stays centred throughout a live drag-resize, not just once it ends."
   (let ((screen (rl:get-mouse-position)))
     (cond
       ;; Palette clicks never reach the canvas.
-      ((and (rl:is-mouse-button-pressed :mouse-button-left)
+      ((and (mouse-button-pressed-p :mouse-button-left)
             (in-palette-p (v:vx screen)))
        (let ((domain (palette-domain-at (v:vx screen) (v:vy screen)))
              (kind (palette-kind-at (editor-domain editor)
@@ -165,7 +165,7 @@ the view stays centred throughout a live drag-resize, not just once it ends."
                 (setf (editor-placing editor) kind
                       (editor-pending editor) nil
                       (editor-status editor) "Click on the canvas to place it.")))))
-      ((rl:is-mouse-button-pressed :mouse-button-left)
+      ((mouse-button-pressed-p :mouse-button-left)
        (let ((at (mouse-model-position camera)))
          (cond ((editor-placing editor) (place-component editor at))
                ;; In RUN, clicking a pushbutton presses it instead of selecting.
@@ -173,17 +173,17 @@ the view stays centred throughout a live drag-resize, not just once it ends."
                      (press-button-at editor at)))
                (t (begin-wire-or-select editor at)))))))
   ;; Buttons are momentary: released as soon as the mouse comes up.
-  (unless (rl:is-mouse-button-down :mouse-button-left)
+  (unless (mouse-button-down-p :mouse-button-left)
     (dolist (component (ofs:circuit-components (editor-circuit editor)))
       (setf (ofs:component-pressed component) nil)))
   ;; Drag the selected component.
   (when (and (editor-dragging editor)
-             (rl:is-mouse-button-down :mouse-button-left))
+             (mouse-button-down-p :mouse-button-left))
     (let ((at (mouse-model-position camera)))
       (ofs:move-component (editor-dragging editor)
                           (+ (ofs:pt-x at) (editor-drag-dx editor))
                           (+ (ofs:pt-y at) (editor-drag-dy editor)))))
-  (unless (rl:is-mouse-button-down :mouse-button-left)
+  (unless (mouse-button-down-p :mouse-button-left)
     (setf (editor-dragging editor) nil)))
 
 (defun prompt-label (purpose)
@@ -244,16 +244,16 @@ the view stays centred throughout a live drag-resize, not just once it ends."
              (setf (editor-prompt-buffer editor)
                    (concatenate 'string (editor-prompt-buffer editor)
                                 (string (code-char code))))))
-  (when (and (rl:is-key-pressed :key-backspace)
+  (when (and (key-pressed-p :key-backspace)
              (plusp (length (editor-prompt-buffer editor))))
     (setf (editor-prompt-buffer editor)
           (subseq (editor-prompt-buffer editor)
                   0 (1- (length (editor-prompt-buffer editor))))))
-  (cond ((rl:is-key-pressed :key-escape)
+  (cond ((key-pressed-p :key-escape)
          (setf (editor-prompt editor) nil
                (editor-prompt-target editor) nil
                (editor-status editor) "Cancelled."))
-        ((or (rl:is-key-pressed :key-enter) (rl:is-key-pressed :key-kp-enter))
+        ((or (key-pressed-p :key-enter) (key-pressed-p :key-kp-enter))
          (finish-prompt editor))))
 
 (defun begin-prompt (editor purpose &key target (initial "") hint)
@@ -278,19 +278,19 @@ the view stays centred throughout a live drag-resize, not just once it ends."
   (when (editor-prompt editor)
     (return-from handle-keys (handle-prompt-keys editor)))
   (let ((circuit (editor-circuit editor)))
-    (when (rl:is-key-pressed :key-t)
+    (when (key-pressed-p :key-t)
       (let ((component (editor-selected editor)))
         (when component
           (begin-prompt editor :rename :target component
                                :initial (ofs:component-label component)
                                :hint (retag-hint component)))))
-    (when (rl:is-key-pressed :key-s) (begin-prompt editor :save))
-    (when (rl:is-key-pressed :key-l) (begin-prompt editor :load))
-    (when (rl:is-key-pressed :key-escape)
+    (when (key-pressed-p :key-s) (begin-prompt editor :save))
+    (when (key-pressed-p :key-l) (begin-prompt editor :load))
+    (when (key-pressed-p :key-escape)
       (setf (editor-placing editor) nil
             (editor-pending editor) nil
             (editor-status editor) "Cancelled."))
-    (when (or (rl:is-key-pressed :key-delete) (rl:is-key-pressed :key-backspace))
+    (when (or (key-pressed-p :key-delete) (key-pressed-p :key-backspace))
       (let ((component (editor-selected editor)))
         (when component
           (ofs:remove-component circuit component)
@@ -299,14 +299,14 @@ the view stays centred throughout a live drag-resize, not just once it ends."
                 (editor-pending editor) nil
                 (editor-status editor)
                 (format nil "Removed ~a." (ofs:component-name component))))))
-    (when (rl:is-key-pressed :key-space)
+    (when (key-pressed-p :key-space)
       (setf (editor-mode editor) (if (eq (editor-mode editor) :run) :edit :run)
             (editor-pending editor) nil
             (editor-status editor)
             (if (eq (editor-mode editor) :run)
                 "Running. Click a pushbutton to operate it."
                 "Editing. Simulation stopped.")))
-    (when (rl:is-key-pressed :key-f)
+    (when (key-pressed-p :key-f)
       (fit-view camera circuit))
     ;; No keyboard override for coils: a valve is shifted by wiring a solenoid
     ;; symbol to its tag and energising it, which is the whole point of the
@@ -435,7 +435,7 @@ the pushbutton to drive the valve and extend the cylinder."
       (rl:set-window-min-size 640 400)
       (rl:set-target-fps 60)
       (sync-camera-to-window camera)
-      (loop until (rl:window-should-close)
+      (loop until (window-should-close-p)
             do (sync-camera-to-window camera)
                (handle-pan-and-zoom editor camera)
                (handle-mouse editor camera)
@@ -446,7 +446,7 @@ the pushbutton to drive the valve and extend the cylinder."
                ;; while the canvas drew the new one -- pressing a button in the
                ;; loaded drawing would then do nothing at all.
                (let ((circuit (editor-circuit editor)))
-                 (when (or (not (eq circuit fitted)) (rl:is-window-resized))
+                 (when (or (not (eq circuit fitted)) (window-resized-p))
                    (fit-view camera circuit)
                    (setf fitted circuit))
                  (if (eq (editor-mode editor) :run)

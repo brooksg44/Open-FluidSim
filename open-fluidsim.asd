@@ -33,6 +33,7 @@
   :serial t
   :components ((:module "ui"
                 :components ((:file "package")
+                             (:file "raylib-bool")
                              (:file "render")
                              (:file "palette")
                              (:file "app")))))
