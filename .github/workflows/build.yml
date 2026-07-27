@@ -2,6 +2,7 @@ name: build
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 jobs:
@@ -79,3 +80,112 @@ jobs:
             # directory beside itself. Keep the folder next to the .exe when
             # unzipping or the L prompt will offer nothing to load.
             circuits/
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # raylib for the renderer; libffi and pkg-config for the same cffi-libffi
+      # grovel step Windows needs. macOS ships a libffi but no headers outside
+      # the SDK, and brew's is keg-only, hence PKG_CONFIG_PATH below.
+      - name: Install SBCL and raylib
+        run: brew install sbcl raylib pkg-config libffi
+
+      - name: Install Quicklisp
+        run: |
+          curl -fsSL https://beta.quicklisp.org/quicklisp.lisp -o quicklisp.lisp
+          sbcl --non-interactive --load quicklisp.lisp \
+               --eval '(quicklisp-quickstart:install)'
+
+      - name: Clone cl-raylib
+        run: git clone https://github.com/longlene/cl-raylib ~/quicklisp/local-projects/cl-raylib
+
+      - name: Build
+        run: |
+          export PKG_CONFIG_PATH="$(brew --prefix libffi)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          pkg-config --cflags libffi
+          sbcl --noinform --disable-debugger --non-interactive --load build.lisp
+          file open-fluidsim
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: open-fluidsim-macos
+          path: |
+            open-fluidsim
+            circuits/
+
+  release:
+    # Tags only. Pushes to main still build, so a broken tree is caught before
+    # anyone tags it, but they publish nothing.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+
+      - name: Package
+        run: |
+          set -eux
+          tag="${GITHUB_REF_NAME}"
+          # Artifacts do not carry the executable bit, so the Unix binary
+          # arrives unrunnable and has to be marked again before zipping.
+          chmod +x dist/open-fluidsim-macos/open-fluidsim
+          (cd dist/open-fluidsim-windows && zip -r "../open-fluidsim-${tag}-windows-x64.zip" .)
+          (cd dist/open-fluidsim-macos   && zip -r "../open-fluidsim-${tag}-macos-arm64.zip" .)
+          ls -l dist/*.zip
+
+      - name: Release notes
+        run: |
+          cat > notes.md <<'EOF'
+          ## Downloads
+
+          | | |
+          |---|---|
+          | Windows (x86-64) | `open-fluidsim-VERSION-windows-x64.zip` |
+          | macOS (Apple Silicon) | `open-fluidsim-VERSION-macos-arm64.zip` |
+
+          **Unzip the whole folder and keep it together.** The program looks for
+          `raylib.dll` / `libffi-8.dll` and the `circuits/` examples beside
+          itself; lifting the executable out on its own loses all of them.
+
+          ### Windows
+
+          Run `open-fluidsim.exe`. It is unsigned, so SmartScreen will warn on
+          first launch: *More info* → *Run anyway*.
+
+          ### macOS
+
+          Needs raylib installed, which the binary loads at startup:
+
+          ```sh
+          brew install raylib
+          ```
+
+          It is unsigned too, so the first launch needs right-click → *Open*, or
+          `xattr -dr com.apple.quarantine open-fluidsim`.
+
+          ### Where your circuits go
+
+          `S` saves to `Documents\Open-FluidSim` on Windows and
+          `~/Documents/Open-FluidSim` on macOS; `L` searches there first and the
+          bundled `circuits/` after, so the examples load by name and your edits
+          never overwrite them. Set `OPEN_FLUIDSIM_CIRCUITS` to put them
+          somewhere else.
+          EOF
+          sed -i "s/VERSION/${GITHUB_REF_NAME}/g" notes.md
+          cat notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Open FluidSim ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            dist/*.zip
